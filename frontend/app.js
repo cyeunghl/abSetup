@@ -11,6 +11,10 @@ function inferApiBase() {
 
   const { protocol, hostname, port } = window.location;
 
+  if (port === '8000') {
+    return `${protocol}//${hostname}${port ? `:${port}` : ''}`.replace(/\/$/, '');
+  }
+
   if (protocol.startsWith('http')) {
     if (hostname.endsWith('.app.github.dev')) {
       return `${protocol}//${hostname.replace(/-\d+(?=\.)/, '-8000')}`;

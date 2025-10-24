@@ -4,31 +4,17 @@ This project provides a lightweight Python backend and a static frontend for pla
 
 ## Getting Started
 
-### Backend
+### Backend + Frontend
 
-The backend relies only on the Python standard library. Start it with:
+The backend now serves the single-page interface directly, so one command starts everything:
 
 ```bash
 python backend/app/main.py
 ```
 
-The API will be served on `http://localhost:8000`.
+Open `http://localhost:8000` in your browser to interact with the app. The root page loads the frontend and all API calls go to the same origin, so there is no longer a need to juggle multiple ports or overrides.
 
-### Frontend
-
-Serve the static frontend with any web server. For example, using Python:
-
-```bash
-python -m http.server 5173 --directory frontend
-```
-
-Then open `http://localhost:5173` in your browser. The frontend automatically targets the backend at `http://localhost:8000` when running locally.
-
-If you are using a remote development environment (such as GitHub Codespaces) or have the API exposed on a different host, append `?apiBase=<url>` to the frontend URL to override the detected API location. For example:
-
-```
-https://<your-env>-5173.preview.app.github.dev/?apiBase=https://<your-env>-8000.preview.app.github.dev
-```
+If you are working in a remote development environment (e.g. GitHub Codespaces), expose port `8000` and visit the forwarded URL. The interface will automatically speak to the same host. If you prefer to host the frontend separately, you can still override the API location by appending `?apiBase=<url>` to the page URL.
 
 ## Features
 

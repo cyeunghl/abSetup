@@ -1,11 +1,31 @@
-"""Lightweight HTTP server implementing the antibody assay API."""
+"""Lightweight HTTP server implementing the antibody assay API and static UI."""
 
 from __future__ import annotations
 
 import json
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any, Dict, List, Tuple
+from urllib.parse import urlparse
+
+import mimetypes
+
+FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
+
+
+def _load_static_file(request_path: str) -> Tuple[bytes, str]:
+    """Return the bytes and mime type for a frontend asset."""
+
+    safe_root = FRONTEND_DIR.resolve()
+    candidate = (safe_root / request_path.lstrip("/")).resolve()
+
+    if not str(candidate).startswith(str(safe_root)) or not candidate.is_file():
+        raise FileNotFoundError(request_path)
+
+    mime_type, _ = mimetypes.guess_type(candidate)
+    with candidate.open("rb") as file_handle:
+        return file_handle.read(), mime_type or "application/octet-stream"
 
 try:  # pragma: no cover - import shim for direct execution
     from .services import (
@@ -170,11 +190,35 @@ class AssayRequestHandler(BaseHTTPRequestHandler):
         self.send_response(HTTPStatus.NO_CONTENT.value)
         self.end_headers()
 
+    def do_HEAD(self) -> None:  # noqa: N802
+        parsed = urlparse(self.path)
+        normalized = parsed.path
+
+        if normalized in {"", "/"}:
+            self._serve_static("index.html", head_only=True)
+            return
+
+        if normalized in {"/app.js", "/styles.css"}:
+            self._serve_static(normalized, head_only=True)
+            return
+
+        self.send_error(HTTPStatus.NOT_FOUND.value, "Not Found")
+
     def do_GET(self) -> None:  # noqa: N802
-        if self.path.rstrip("/") == "":
+        parsed = urlparse(self.path)
+        normalized = parsed.path
+
+        if normalized in {"", "/"}:
+            return self._serve_static("index.html")
+
+        if normalized in {"/app.js", "/styles.css"}:
+            return self._serve_static(normalized)
+
+        if normalized == "/api/health":
             _json_response(self, HTTPStatus.OK, {"message": "Antibody Assay Setup API is running"})
-        else:
-            _json_error(self, HTTPStatus.NOT_FOUND, "Endpoint not found")
+            return
+
+        _json_error(self, HTTPStatus.NOT_FOUND, "Endpoint not found")
 
     def do_POST(self) -> None:  # noqa: N802
         try:
@@ -217,6 +261,20 @@ class AssayRequestHandler(BaseHTTPRequestHandler):
         )
         _json_response(self, HTTPStatus.OK, result)
 
+    def _serve_static(self, asset_path: str, *, head_only: bool = False) -> None:
+        try:
+            content, mime_type = _load_static_file(asset_path)
+        except FileNotFoundError:
+            _json_error(self, HTTPStatus.NOT_FOUND, "Asset not found")
+            return
+
+        self.send_response(HTTPStatus.OK.value)
+        self.send_header("Content-Type", mime_type)
+        self.send_header("Content-Length", str(len(content)))
+        self.end_headers()
+        if not head_only:
+            self.wfile.write(content)
+
 
 def run(host: str = "0.0.0.0", port: int = 8000) -> None:
     """Start the HTTP server."""
@@ -231,4 +289,3 @@ def run(host: str = "0.0.0.0", port: int = 8000) -> None:
 
 if __name__ == "__main__":  # pragma: no cover - CLI entry point
     run()
-
