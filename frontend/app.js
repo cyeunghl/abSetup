@@ -246,6 +246,9 @@ async function generatePlateMap() {
     summaryParts.push(
       `${plateMaps.length} plate${plateMaps.length > 1 ? 's' : ''} generated`,
     );
+    if (plateMaps.length > 1) {
+      summaryParts.push('Displaying first plate example');
+    }
     summaryParts.push(
       `${replicates} replicate${replicates === 1 ? '' : 's'} per condition`,
     );
@@ -277,75 +280,85 @@ function buildWellLookup(wells) {
 function renderPlateMaps() {
   plateContainer.innerHTML = '';
 
-  plateMaps.forEach((plate) => {
-    const plateElement = document.createElement('div');
-    plateElement.className = 'plate';
+  if (!plateMaps.length) {
+    return;
+  }
 
-    const header = document.createElement('div');
-    header.className = 'plate-header';
-    const title = document.createElement('h3');
-    title.textContent = `${plate.cell_line} · ${plate.timepoint} hr`;
-    const subtitle = document.createElement('p');
-    const replicateCountRaw = Number(plate.replicates || getLatestReplicates() || 1);
-    const replicateCount = !Number.isNaN(replicateCountRaw) && replicateCountRaw > 0 ? replicateCountRaw : 1;
-    const controlRange = replicateCount > 1 ? `1–${replicateCount}` : '1';
-    const replicateLabel = `${replicateCount} replicate${replicateCount === 1 ? '' : 's'}`;
-    subtitle.textContent = `Negative controls occupy row A columns ${controlRange}. ${replicateLabel} per condition are placed automatically and controls follow the final test article.`;
-    subtitle.className = 'subtle';
-    header.appendChild(title);
-    header.appendChild(subtitle);
+  const plate = plateMaps[0];
+  const plateElement = document.createElement('div');
+  plateElement.className = 'plate';
 
-    const gridWrapper = document.createElement('div');
-    gridWrapper.className = 'plate-grid';
-    const table = document.createElement('table');
+  const header = document.createElement('div');
+  header.className = 'plate-header';
+  const title = document.createElement('h3');
+  title.textContent = `${plate.cell_line} · ${plate.timepoint} hr`;
+  const subtitle = document.createElement('p');
+  const replicateCountRaw = Number(plate.replicates || getLatestReplicates() || 1);
+  const replicateCount = !Number.isNaN(replicateCountRaw) && replicateCountRaw > 0 ? replicateCountRaw : 1;
+  const controlRange = replicateCount > 1 ? `1–${replicateCount}` : '1';
+  const replicateLabel = `${replicateCount} replicate${replicateCount === 1 ? '' : 's'}`;
+  subtitle.textContent = `Negative controls occupy row A columns ${controlRange}. ${replicateLabel} per condition are placed automatically and controls follow the final test article.`;
+  subtitle.className = 'subtle';
+  header.appendChild(title);
+  header.appendChild(subtitle);
 
-    const thead = document.createElement('thead');
-    const headerRow = document.createElement('tr');
-    const corner = document.createElement('th');
-    corner.textContent = 'Row';
-    headerRow.appendChild(corner);
-    COLUMN_LABELS.forEach((column) => {
-      const th = document.createElement('th');
-      th.textContent = column;
-      headerRow.appendChild(th);
-    });
-    thead.appendChild(headerRow);
+  const gridWrapper = document.createElement('div');
+  gridWrapper.className = 'plate-grid';
+  const table = document.createElement('table');
 
-    const tbody = document.createElement('tbody');
-    const lookup = buildWellLookup(plate.wells);
-
-    ROW_LABELS.forEach((row) => {
-      const tr = document.createElement('tr');
-      const rowHeader = document.createElement('td');
-      rowHeader.textContent = row;
-      tr.appendChild(rowHeader);
-
-      COLUMN_LABELS.forEach((column) => {
-        const td = document.createElement('td');
-        const well = lookup.get(`${row}${column}`);
-        if (well) {
-          td.innerHTML = `
-            <div class="well">
-              <span>${well.test_article}</span>
-              <span class="id">${well.well_id}</span>
-            </div>
-          `;
-        } else {
-          td.innerHTML = '<span class="placeholder">—</span>';
-        }
-        tr.appendChild(td);
-      });
-
-      tbody.appendChild(tr);
-    });
-
-    table.appendChild(thead);
-    table.appendChild(tbody);
-    gridWrapper.appendChild(table);
-    plateElement.appendChild(header);
-    plateElement.appendChild(gridWrapper);
-    plateContainer.appendChild(plateElement);
+  const thead = document.createElement('thead');
+  const headerRow = document.createElement('tr');
+  const corner = document.createElement('th');
+  corner.textContent = 'Row';
+  headerRow.appendChild(corner);
+  COLUMN_LABELS.forEach((column) => {
+    const th = document.createElement('th');
+    th.textContent = column;
+    headerRow.appendChild(th);
   });
+  thead.appendChild(headerRow);
+
+  const tbody = document.createElement('tbody');
+  const lookup = buildWellLookup(plate.wells);
+
+  ROW_LABELS.forEach((row) => {
+    const tr = document.createElement('tr');
+    const rowHeader = document.createElement('td');
+    rowHeader.textContent = row;
+    tr.appendChild(rowHeader);
+
+    COLUMN_LABELS.forEach((column) => {
+      const td = document.createElement('td');
+      const well = lookup.get(`${row}${column}`);
+      if (well) {
+        td.innerHTML = `
+          <div class="well">
+            <span>${well.test_article}</span>
+            <span class="id">${well.well_id}</span>
+          </div>
+        `;
+      } else {
+        td.innerHTML = '<span class="placeholder">—</span>';
+      }
+      tr.appendChild(td);
+    });
+
+    tbody.appendChild(tr);
+  });
+
+  table.appendChild(thead);
+  table.appendChild(tbody);
+  gridWrapper.appendChild(table);
+  plateElement.appendChild(header);
+  plateElement.appendChild(gridWrapper);
+  plateContainer.appendChild(plateElement);
+
+  if (plateMaps.length > 1) {
+    const note = document.createElement('p');
+    note.className = 'subtle plate-note';
+    note.textContent = `Showing 1 of ${plateMaps.length} plates. Use exports for full layouts.`;
+    plateContainer.appendChild(note);
+  }
 }
 
 function buildCsvRows() {
@@ -479,7 +492,7 @@ function resetDilutionTable() {
   renderDilutionRows();
   dilutionResultsSection.classList.add('hidden');
   dilutionError.textContent = '';
-  finalConcentrationInput.value = '10';
+  finalConcentrationInput.value = '1.5';
   totalVolumeInput.value = '100';
 }
 
