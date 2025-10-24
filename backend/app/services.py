@@ -37,13 +37,16 @@ def _horizontal_pairs() -> List[Pair]:
 
 
 def _vertical_pairs() -> List[Pair]:
-    pair_order: List[Tuple[str, str]] = [("B", "C"), ("D", "E"), ("F", "G"), ("H", "A")]
     pairs: List[Pair] = []
-    for column in COLUMN_RANGE:
-        for first, second in pair_order:
-            if (first == "A" or second == "A") and column in {1, 2}:
+    column_pairs = [
+        (COLUMN_RANGE[index], COLUMN_RANGE[index + 1])
+        for index in range(0, len(COLUMN_RANGE), 2)
+    ]
+    for left_column, right_column in column_pairs:
+        for row in ROW_LABELS:
+            if row == "A":
                 continue
-            pairs.append(((first, column), (second, column)))
+            pairs.append(((row, left_column), (row, right_column)))
     return pairs
 
 
