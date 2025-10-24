@@ -77,7 +77,12 @@ def generate_plate_maps(
                     row, column = next(position_iter)
                     wells.append(_assign_well(row, column, control_label, cell_line, timepoint))
 
-            wells.sort(key=lambda w: (ROW_LABELS.index(w.row), w.column))
+            wells.sort(
+                key=lambda well: (
+                    ROW_LABELS.index(well["row"]),
+                    well["column"],
+                )
+            )
             plates.append({"cell_line": cell_line, "timepoint": timepoint, "wells": wells})
 
     return plates
