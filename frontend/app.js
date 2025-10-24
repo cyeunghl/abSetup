@@ -50,6 +50,7 @@ const plateContainer = document.querySelector('#plateContainer');
 const exportCsvButton = document.querySelector('#exportCsv');
 const copyCsvButton = document.querySelector('#copyCsv');
 const copyPlateTablesButton = document.querySelector('#copyPlateTables');
+const exportXlsxButton = document.querySelector('#exportXlsx');
 
 const dilutionTableBody = document.querySelector('#dilutionTableBody');
 const finalConcentrationInput = document.querySelector('#finalConcentration');
@@ -58,6 +59,8 @@ const dilutionError = document.querySelector('#dilutionError');
 const dilutionResultsSection = document.querySelector('#dilutionResults');
 const dilutionResultsBody = document.querySelector('#dilutionResultsBody');
 const loadArticlesButton = document.querySelector('#loadArticlesFromPlate');
+const copyDilutionTableButton = document.querySelector('#copyDilutionTable');
+const resetDilutionTableButton = document.querySelector('#resetDilutionTable');
 
 const reagentTimepointsInput = document.querySelector('#reagentTimepoints');
 const reagentArticlesInput = document.querySelector('#reagentArticles');
@@ -75,6 +78,8 @@ const loadPhrodoButton = document.querySelector('#loadPhrodoFromPlate');
 let plateMaps = [];
 let dilutionRows = [];
 let latestPlateInputs = { testArticles: [], cellLines: [], timepoints: [] };
+let latestDilutionResults = [];
+let latestPhrodoResult = null;
 
 const parseListInput = (value) =>
   value
@@ -327,6 +332,392 @@ async function copyPlateTables() {
   }
 }
 
+async function copyDilutionTable() {
+  const rows = [
+    ['Test Article', 'Stock Concentration (µM)'],
+    ...dilutionRows.map((row) => [row.testArticle || '', row.stockConcentration || '']),
+  ];
+
+  const text = rows.map((line) => line.join('\t')).join('\n');
+  try {
+    await navigator.clipboard.writeText(text);
+    dilutionError.textContent = '';
+  } catch (error) {
+    dilutionError.textContent = 'Unable to copy the concentration table to the clipboard.';
+  }
+}
+
+function resetDilutionTable() {
+  dilutionRows = [{ testArticle: '', stockConcentration: '' }];
+  latestDilutionResults = [];
+  renderDilutionRows();
+  dilutionResultsSection.classList.add('hidden');
+  dilutionError.textContent = '';
+  finalConcentrationInput.value = '10';
+  totalVolumeInput.value = '100';
+}
+
+function sanitizeSheetName(base, usedNames) {
+  const invalidPattern = /[\\/?*\[\]:]/g;
+  let candidate = (base || 'Sheet').replace(invalidPattern, ' ').trim();
+  if (!candidate) {
+    candidate = 'Sheet';
+  }
+  if (candidate.length > 31) {
+    candidate = candidate.slice(0, 31);
+  }
+  let uniqueName = candidate;
+  let suffix = 1;
+  while (usedNames.has(uniqueName)) {
+    const extra = `_${suffix}`;
+    const baseLength = Math.min(candidate.length, 31 - extra.length);
+    uniqueName = `${candidate.slice(0, baseLength)}${extra}`;
+    suffix += 1;
+  }
+  usedNames.add(uniqueName);
+  return uniqueName;
+}
+
+function columnLabelFromIndex(index) {
+  let value = index;
+  let label = '';
+  while (value > 0) {
+    const remainder = (value - 1) % 26;
+    label = String.fromCharCode(65 + remainder) + label;
+    value = Math.floor((value - 1) / 26);
+  }
+  return label;
+}
+
+function escapeXml(text) {
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+const CRC32_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let i = 0; i < 256; i += 1) {
+    let crc = i;
+    for (let j = 0; j < 8; j += 1) {
+      if ((crc & 1) !== 0) {
+        crc = 0xedb88320 ^ (crc >>> 1);
+      } else {
+        crc >>>= 1;
+      }
+    }
+    table[i] = crc >>> 0;
+  }
+  return table;
+})();
+
+function crc32(data) {
+  let crc = 0xffffffff;
+  for (let index = 0; index < data.length; index += 1) {
+    const byte = data[index];
+    crc = CRC32_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function buildSheetXml(rows) {
+  const sheetRows = rows.map((cells, rowIndex) => {
+    const cellXml = cells
+      .map((cell, cellIndex) => {
+        const columnLabel = columnLabelFromIndex(cellIndex + 1);
+        const reference = `${columnLabel}${rowIndex + 1}`;
+        const value = cell === undefined || cell === null ? '' : cell;
+        return `<c r="${reference}" t="inlineStr"><is><t>${escapeXml(value)}</t></is></c>`;
+      })
+      .join('');
+    return `<row r="${rowIndex + 1}">${cellXml}</row>`;
+  });
+
+  return (
+    '<?xml version="1.0" encoding="UTF-8"?>' +
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+    `<sheetData>${sheetRows.join('')}</sheetData>` +
+    '</worksheet>'
+  );
+}
+
+function prepareWorkbookSheets() {
+  if (!plateMaps.length) {
+    throw new Error('Generate a plate map before exporting.');
+  }
+
+  const usedNames = new Set();
+  const sheets = [];
+
+  sheets.push({
+    name: sanitizeSheetName('plateWells', usedNames),
+    rows: buildCsvRows(),
+  });
+
+  plateMaps.forEach((plate, index) => {
+    const rows = [[`${plate.cell_line} · ${plate.timepoint} hr`]];
+    rows.push(['Row', ...COLUMN_LABELS.map((value) => String(value))]);
+
+    const lookup = buildWellLookup(plate.wells);
+    ROW_LABELS.forEach((row) => {
+      const rowValues = [row];
+      COLUMN_LABELS.forEach((column) => {
+        const well = lookup.get(`${row}${column}`);
+        rowValues.push(well ? well.test_article : '');
+      });
+      rows.push(rowValues);
+    });
+
+    const baseName = plate.cell_line
+      ? `${plate.cell_line}_${plate.timepoint}h`
+      : `Plate${index + 1}`;
+    sheets.push({
+      name: sanitizeSheetName(baseName, usedNames),
+      rows,
+    });
+  });
+
+  const concentrationRows = [
+    ['Final concentration (µM)', finalConcentrationInput.value || ''],
+    ['Total assay volume (µL)', totalVolumeInput.value || ''],
+    [],
+    ['Test Article', 'Stock Concentration (µM)'],
+  ];
+
+  if (dilutionRows.length === 0) {
+    concentrationRows.push(['', '']);
+  } else {
+    dilutionRows.forEach((row) => {
+      concentrationRows.push([row.testArticle || '', row.stockConcentration || '']);
+    });
+  }
+
+  if (latestDilutionResults.length) {
+    concentrationRows.push([]);
+    concentrationRows.push(['Test Article', 'Source Volume (µL)', 'PBS Volume (µL)']);
+    latestDilutionResults.forEach((result) => {
+      concentrationRows.push([
+        result.test_article,
+        String(result.source_volume_uL),
+        String(result.diluent_volume_uL),
+      ]);
+    });
+  }
+
+  sheets.push({
+    name: sanitizeSheetName('concentrationCalculations', usedNames),
+    rows: concentrationRows,
+  });
+
+  const phrodoRows = [
+    ['Number of Timepoints', reagentTimepointsInput.value || ''],
+    ['Number of Test Articles', reagentArticlesInput.value || ''],
+    ['Number of Cell Lines', reagentCellLinesInput.value || ''],
+    ['Replicates per Condition', reagentReplicatesInput.value || ''],
+    ['Volume per Replicate (µL)', reagentVolumeInput.value || ''],
+    ['Overage (%)', reagentOverageInput.value || ''],
+  ];
+
+  if (latestPhrodoResult) {
+    phrodoRows.push([]);
+    phrodoRows.push(['Total Volume (µL)', String(latestPhrodoResult.total_volume_uL)]);
+    phrodoRows.push(['pHrodo Volume (µL)', String(latestPhrodoResult.phrodo_volume_uL)]);
+    phrodoRows.push(['PBS Volume (µL)', String(latestPhrodoResult.diluent_volume_uL)]);
+  }
+
+  sheets.push({
+    name: sanitizeSheetName('pHrodo', usedNames),
+    rows: phrodoRows,
+  });
+
+  return sheets;
+}
+
+function createZip(files) {
+  const encoder = new TextEncoder();
+  const fileChunks = [];
+  const centralChunks = [];
+  let offset = 0;
+
+  files.forEach((file) => {
+    const nameBytes = encoder.encode(file.path);
+    const dataBytes =
+      typeof file.data === 'string' ? encoder.encode(file.data) : file.data;
+    const crc = crc32(dataBytes);
+
+    const localHeader = new Uint8Array(30 + nameBytes.length);
+    const localView = new DataView(localHeader.buffer);
+    localView.setUint32(0, 0x04034b50, true);
+    localView.setUint16(4, 20, true);
+    localView.setUint16(6, 0, true);
+    localView.setUint16(8, 0, true);
+    localView.setUint16(10, 0, true);
+    localView.setUint16(12, 0, true);
+    localView.setUint32(14, crc, true);
+    localView.setUint32(18, dataBytes.length, true);
+    localView.setUint32(22, dataBytes.length, true);
+    localView.setUint16(26, nameBytes.length, true);
+    localView.setUint16(28, 0, true);
+    localHeader.set(nameBytes, 30);
+
+    fileChunks.push(localHeader, dataBytes);
+
+    const centralHeader = new Uint8Array(46 + nameBytes.length);
+    const centralView = new DataView(centralHeader.buffer);
+    centralView.setUint32(0, 0x02014b50, true);
+    centralView.setUint16(4, 20, true);
+    centralView.setUint16(6, 20, true);
+    centralView.setUint16(8, 0, true);
+    centralView.setUint16(10, 0, true);
+    centralView.setUint16(12, 0, true);
+    centralView.setUint16(14, 0, true);
+    centralView.setUint32(16, crc, true);
+    centralView.setUint32(20, dataBytes.length, true);
+    centralView.setUint32(24, dataBytes.length, true);
+    centralView.setUint16(28, nameBytes.length, true);
+    centralView.setUint16(30, 0, true);
+    centralView.setUint16(32, 0, true);
+    centralView.setUint16(34, 0, true);
+    centralView.setUint16(36, 0, true);
+    centralView.setUint32(38, 0, true);
+    centralView.setUint32(42, offset, true);
+    centralHeader.set(nameBytes, 46);
+
+    centralChunks.push(centralHeader);
+
+    offset += localHeader.length + dataBytes.length;
+  });
+
+  const centralSize = centralChunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const endRecord = new Uint8Array(22);
+  const endView = new DataView(endRecord.buffer);
+  endView.setUint32(0, 0x06054b50, true);
+  endView.setUint16(4, 0, true);
+  endView.setUint16(6, 0, true);
+  endView.setUint16(8, files.length, true);
+  endView.setUint16(10, files.length, true);
+  endView.setUint32(12, centralSize, true);
+  endView.setUint32(16, offset, true);
+  endView.setUint16(20, 0, true);
+
+  const totalSize = offset + centralSize + endRecord.length;
+  const zipBuffer = new Uint8Array(totalSize);
+  let cursor = 0;
+  fileChunks.forEach((chunk) => {
+    zipBuffer.set(chunk, cursor);
+    cursor += chunk.length;
+  });
+  centralChunks.forEach((chunk) => {
+    zipBuffer.set(chunk, cursor);
+    cursor += chunk.length;
+  });
+  zipBuffer.set(endRecord, cursor);
+
+  return new Blob([zipBuffer], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+}
+
+function buildWorkbookBlob() {
+  const sheets = prepareWorkbookSheets();
+  const sheetEntries = sheets.map((sheet, index) => ({
+    ...sheet,
+    sheetId: index + 1,
+    relId: `rId${index + 1}`,
+    path: `xl/worksheets/sheet${index + 1}.xml`,
+  }));
+
+  const workbookXml =
+    '<?xml version="1.0" encoding="UTF-8"?>' +
+    '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+    '<sheets>' +
+    sheetEntries
+      .map(
+        (entry) =>
+          `<sheet name="${escapeXml(entry.name)}" sheetId="${entry.sheetId}" r:id="${entry.relId}"/>`,
+      )
+      .join('') +
+    '</sheets>' +
+    '</workbook>';
+
+  const workbookRels =
+    '<?xml version="1.0" encoding="UTF-8"?>' +
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+    sheetEntries
+      .map(
+        (entry) =>
+          `<Relationship Id="${entry.relId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${entry.sheetId}.xml"/>`,
+      )
+      .join('') +
+    '</Relationships>';
+
+  const contentTypes =
+    '<?xml version="1.0" encoding="UTF-8"?>' +
+    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+    '<Default Extension="xml" ContentType="application/xml"/>' +
+    '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
+    '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' +
+    sheetEntries
+      .map(
+        (entry) =>
+          `<Override PartName="/xl/worksheets/sheet${entry.sheetId}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`,
+      )
+      .join('') +
+    '</Types>';
+
+  const stylesXml =
+    '<?xml version="1.0" encoding="UTF-8"?>' +
+    '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+    '<fonts count="1"><font><name val="Arial"/><family val="2"/></font></fonts>' +
+    '<fills count="1"><fill><patternFill patternType="none"/></fill></fills>' +
+    '<borders count="1"><border/></borders>' +
+    '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
+    '<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>' +
+    '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>' +
+    '</styleSheet>';
+
+  const relationships =
+    '<?xml version="1.0" encoding="UTF-8"?>' +
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+    '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>' +
+    '</Relationships>';
+
+  const files = [
+    { path: '[Content_Types].xml', data: contentTypes },
+    { path: '_rels/.rels', data: relationships },
+    { path: 'xl/workbook.xml', data: workbookXml },
+    { path: 'xl/_rels/workbook.xml.rels', data: workbookRels },
+    { path: 'xl/styles.xml', data: stylesXml },
+  ];
+
+  sheetEntries.forEach((entry) => {
+    files.push({ path: entry.path, data: buildSheetXml(entry.rows) });
+  });
+
+  return createZip(files);
+}
+
+function exportXlsx() {
+  try {
+    const blob = buildWorkbookBlob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'assay-setup.xlsx';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    plateError.textContent = '';
+  } catch (error) {
+    plateError.textContent = error.message || 'Unable to generate the XLSX export.';
+  }
+}
+
 async function calculateDilutions() {
   const items = dilutionRows
     .filter((row) => row.testArticle && row.stockConcentration)
@@ -364,16 +755,19 @@ async function calculateDilutions() {
     }
 
     const results = await response.json();
-    renderDilutionResults(results);
+    latestDilutionResults = Array.isArray(results) ? results : [];
+    renderDilutionResults(latestDilutionResults);
   } catch (error) {
     dilutionError.textContent = error.message;
     dilutionResultsSection.classList.add('hidden');
+    latestDilutionResults = [];
   }
 }
 
 function renderDilutionResults(results) {
   if (!Array.isArray(results) || results.length === 0) {
     dilutionResultsSection.classList.add('hidden');
+    latestDilutionResults = [];
     return;
   }
 
@@ -438,6 +832,7 @@ async function calculatePhrodo() {
     }
 
     const data = await response.json();
+    latestPhrodoResult = data;
     totalVolumeResult.textContent = `${data.total_volume_uL} µL`;
     phrodoResult.textContent = `${data.phrodo_volume_uL} µL`;
     pbsResult.textContent = `${data.diluent_volume_uL} µL`;
@@ -445,6 +840,7 @@ async function calculatePhrodo() {
   } catch (error) {
     reagentError.textContent = error.message;
     reagentResults.classList.add('hidden');
+    latestPhrodoResult = null;
   }
 }
 
@@ -453,11 +849,14 @@ document.querySelector('#addDilutionRow').addEventListener('click', () => {
   dilutionRows.push({ testArticle: '', stockConcentration: '' });
   renderDilutionRows();
 });
-  document.querySelector('#calculateDilutions').addEventListener('click', calculateDilutions);
-  document.querySelector('#calculatePhrodo').addEventListener('click', calculatePhrodo);
+document.querySelector('#calculateDilutions').addEventListener('click', calculateDilutions);
+document.querySelector('#calculatePhrodo').addEventListener('click', calculatePhrodo);
 exportCsvButton.addEventListener('click', exportCsv);
 copyCsvButton.addEventListener('click', copyCsv);
 copyPlateTablesButton.addEventListener('click', copyPlateTables);
+exportXlsxButton.addEventListener('click', exportXlsx);
+copyDilutionTableButton.addEventListener('click', copyDilutionTable);
+resetDilutionTableButton.addEventListener('click', resetDilutionTable);
 loadArticlesButton.addEventListener('click', () => {
   if (!latestPlateInputs.testArticles.length) {
     dilutionError.textContent = 'Generate a plate map to load test articles.';
