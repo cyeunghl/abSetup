@@ -23,7 +23,15 @@
           </div>
           <button id="generatePlateMap" class="btn btn-primary">Generate Plate Map</button>
         </div>
-        <div class="grid">
+        <div class="grid grid-plate">
+          <label>
+            <span>Experiment Name</span>
+            <input id="experimentName" type="text" placeholder="HER2-screen" />
+          </label>
+          <label>
+            <span>Replicates per Condition</span>
+            <input id="replicates" type="number" min="1" value="2" />
+          </label>
           <label>
             <span>Test Articles</span>
             <textarea id="testArticles" rows="4" placeholder="HA-00059, HA-00061, HA-00390"></textarea>

@@ -1,65 +1,54 @@
 from __future__ import annotations
 
-from typing import Dict, List, Tuple
+from typing import Dict, List, Sequence, Tuple
 
 ROW_LABELS = ["A", "B", "C", "D", "E", "F", "G", "H"]
 COLUMN_RANGE = list(range(1, 13))
 
-Pair = Tuple[Tuple[str, int], Tuple[str, int]]
+Coordinate = Tuple[str, int]
 NEGATIVE_CONTROL = "HB-44976-b1"
 LIVE_DEAD_CONTROL = "live:dead"
 UNSTAINED_CONTROL = "unstained"
 
 
-def _well_positions(orientation: str) -> List[Tuple[str, int]]:
-    positions: List[Tuple[str, int]] = []
-    if orientation == "vertical":
-        for column in COLUMN_RANGE:
-            for row in ROW_LABELS:
-                if row == "A" and column in {1, 2}:
-                    continue
-                positions.append((row, column))
-    else:
-        for row in ROW_LABELS:
-            for column in COLUMN_RANGE:
-                if row == "A" and column in {1, 2}:
-                    continue
-                positions.append((row, column))
-    return positions
+def _horizontal_groups(replicates: int) -> List[Sequence[Coordinate]]:
+    groups: List[Sequence[Coordinate]] = []
+    for row in ROW_LABELS:
+        start_column = replicates + 1 if row == "A" else 1
+        for column in range(start_column, COLUMN_RANGE[-1] + 1, replicates):
+            group: List[Coordinate] = []
+            for offset in range(replicates):
+                candidate_column = column + offset
+                if candidate_column > COLUMN_RANGE[-1]:
+                    break
+                group.append((row, candidate_column))
+            if len(group) == replicates:
+                groups.append(tuple(group))
+    return groups
 
 
-def _horizontal_pairs() -> List[Pair]:
-    positions = _well_positions("horizontal")
-    return [
-        (positions[index], positions[index + 1])
-        for index in range(0, len(positions), 2)
-    ]
+def _vertical_groups(replicates: int) -> List[Sequence[Coordinate]]:
+    groups: List[Sequence[Coordinate]] = []
+    for start in range(1, COLUMN_RANGE[-1] + 1, replicates):
+        window = [start + offset for offset in range(replicates)]
+        if window[-1] > COLUMN_RANGE[-1]:
+            break
+        for row in ROW_LABELS[1:]:  # Skip row A to preserve control wells
+            groups.append(tuple((row, column) for column in window))
+    return groups
 
 
-def _vertical_pairs() -> List[Pair]:
-    pairs: List[Pair] = []
-    column_pairs = [
-        (COLUMN_RANGE[index], COLUMN_RANGE[index + 1])
-        for index in range(0, len(COLUMN_RANGE), 2)
-    ]
-    for left_column, right_column in column_pairs:
-        for row in ROW_LABELS:
-            if row == "A":
-                continue
-            pairs.append(((row, left_column), (row, right_column)))
-    return pairs
+def _assignment_groups(orientation: str, replicates: int) -> List[Sequence[Coordinate]]:
+    groups = (
+        _vertical_groups(replicates)
+        if orientation == "vertical"
+        else _horizontal_groups(replicates)
+    )
 
-
-def _assignment_pairs(orientation: str) -> List[Pair]:
-    if orientation == "vertical":
-        pairs = _vertical_pairs()
-    else:
-        pairs = _horizontal_pairs()
-
-    if len(pairs) < 2:
+    if len(groups) < 2:
         raise ValueError("Unable to resolve plate layout for the requested orientation.")
 
-    return pairs
+    return groups
 
 
 def _format_well_id(row: str, column: int) -> str:
@@ -75,9 +64,17 @@ def _assign_well(row: str, column: int, label: str, cell_line: str, timepoint: f
         "cell_line": cell_line,
         "timepoint": timepoint,
     }
-def _validate_capacity(test_article_count: int, orientation: str) -> None:
-    available_pairs = _assignment_pairs(orientation)
-    if test_article_count + 2 > len(available_pairs):
+def _validate_replicates(replicates: int) -> int:
+    if replicates <= 0:
+        raise ValueError("Replicates must be greater than zero.")
+    if replicates > COLUMN_RANGE[-1]:
+        raise ValueError("Replicates cannot exceed the number of columns in the plate.")
+    return replicates
+
+
+def _validate_capacity(test_article_count: int, orientation: str, replicates: int) -> None:
+    available_groups = _assignment_groups(orientation, replicates)
+    if test_article_count + 2 > len(available_groups):
         raise ValueError(
             "The selected number of test articles exceeds the capacity of a 96-well plate."
         )
@@ -89,10 +86,12 @@ def generate_plate_maps(
     timepoints: List[float],
     *,
     orientation: str = "horizontal",
+    replicates: int = 2,
 ) -> List[Dict[str, object]]:
-    _validate_capacity(len(test_articles), orientation)
+    replicates = _validate_replicates(replicates)
+    _validate_capacity(len(test_articles), orientation, replicates)
 
-    assignment_pairs = _assignment_pairs(orientation)
+    assignment_groups = _assignment_groups(orientation, replicates)
 
     plates: List[Dict[str, object]] = []
 
@@ -100,38 +99,35 @@ def generate_plate_maps(
         for timepoint in timepoints:
             wells: List[Dict[str, object]] = []
             # Add negative controls to A1 and A2
-            wells.append(_assign_well("A", 1, NEGATIVE_CONTROL, cell_line, timepoint))
-            wells.append(_assign_well("A", 2, NEGATIVE_CONTROL, cell_line, timepoint))
+            for column in range(1, replicates + 1):
+                wells.append(
+                    _assign_well("A", column, NEGATIVE_CONTROL, cell_line, timepoint)
+                )
 
-            pair_index = 0
+            group_index = 0
             for article in test_articles:
-                first, second = assignment_pairs[pair_index]
-                pair_index += 1
-                wells.append(
-                    _assign_well(first[0], first[1], article, cell_line, timepoint)
-                )
-                wells.append(
-                    _assign_well(second[0], second[1], article, cell_line, timepoint)
-                )
+                group = assignment_groups[group_index]
+                group_index += 1
+                for row, column in group:
+                    wells.append(
+                        _assign_well(row, column, article, cell_line, timepoint)
+                    )
 
-            if pair_index + 2 > len(assignment_pairs):
+            if group_index + 2 > len(assignment_groups):
                 raise ValueError(
                     "Plate layout does not have sufficient space for control wells."
                 )
 
             for control_label, pair in zip(
                 (LIVE_DEAD_CONTROL, UNSTAINED_CONTROL),
-                assignment_pairs[pair_index : pair_index + 2],
+                assignment_groups[group_index : group_index + 2],
             ):
-                first, second = pair
-                wells.append(
-                    _assign_well(first[0], first[1], control_label, cell_line, timepoint)
-                )
-                wells.append(
-                    _assign_well(second[0], second[1], control_label, cell_line, timepoint)
-                )
+                for row, column in pair:
+                    wells.append(
+                        _assign_well(row, column, control_label, cell_line, timepoint)
+                    )
 
-            pair_index += 2
+            group_index += 2
 
             wells.sort(
                 key=lambda well: (
@@ -139,7 +135,14 @@ def generate_plate_maps(
                     well["column"],
                 )
             )
-            plates.append({"cell_line": cell_line, "timepoint": timepoint, "wells": wells})
+            plates.append(
+                {
+                    "cell_line": cell_line,
+                    "timepoint": timepoint,
+                    "replicates": replicates,
+                    "wells": wells,
+                }
+            )
 
     return plates
 

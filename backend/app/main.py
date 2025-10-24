@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 import mimetypes
 
 FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
+MAX_PLATE_COLUMNS = 12
 
 
 def _load_static_file(request_path: str) -> Tuple[bytes, str]:
@@ -112,7 +113,7 @@ VALID_ORIENTATIONS = {"horizontal", "vertical"}
 
 def _parse_plate_map_payload(
     payload: Dict[str, Any]
-) -> Tuple[List[str], List[str], List[float], str]:
+) -> Tuple[List[str], List[str], List[float], str, int]:
     test_articles = _validate_test_articles(
         _ensure_list_of_strings("test_articles", payload.get("test_articles"))
     )
@@ -124,7 +125,15 @@ def _parse_plate_map_payload(
     orientation = orientation_raw.strip().lower() or "horizontal"
     if orientation not in VALID_ORIENTATIONS:
         raise ValueError("'orientation' must be either 'horizontal' or 'vertical'")
-    return test_articles, cell_lines, timepoints, orientation
+    replicates_raw = payload.get("replicates", 2)
+    if not isinstance(replicates_raw, (int, float)):
+        raise ValueError("'replicates' must be a positive number")
+    replicates = int(replicates_raw)
+    if replicates <= 0:
+        raise ValueError("'replicates' must be greater than zero")
+    if replicates > MAX_PLATE_COLUMNS:
+        raise ValueError("'replicates' cannot exceed the number of plate columns")
+    return test_articles, cell_lines, timepoints, orientation, replicates
 
 
 def _parse_dilution_payload(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], float, float]:
@@ -258,12 +267,19 @@ class AssayRequestHandler(BaseHTTPRequestHandler):
             _json_error(self, HTTPStatus.BAD_REQUEST, str(exc))
 
     def _handle_plate_map(self, payload: Dict[str, Any]) -> None:
-        test_articles, cell_lines, timepoints, orientation = _parse_plate_map_payload(payload)
+        (
+            test_articles,
+            cell_lines,
+            timepoints,
+            orientation,
+            replicates,
+        ) = _parse_plate_map_payload(payload)
         plates = generate_plate_maps(
             test_articles,
             cell_lines,
             timepoints,
             orientation=orientation,
+            replicates=replicates,
         )
         _json_response(self, HTTPStatus.OK, {"plates": plates})
 
