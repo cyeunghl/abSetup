@@ -59,7 +59,7 @@ const dilutionError = document.querySelector('#dilutionError');
 const dilutionResultsSection = document.querySelector('#dilutionResults');
 const dilutionResultsBody = document.querySelector('#dilutionResultsBody');
 const loadArticlesButton = document.querySelector('#loadArticlesFromPlate');
-const copyDilutionTableButton = document.querySelector('#copyDilutionTable');
+const copyDilutionResultsButton = document.querySelector('#copyDilutionResults');
 const resetDilutionTableButton = document.querySelector('#resetDilutionTable');
 
 const reagentTimepointsInput = document.querySelector('#reagentTimepoints');
@@ -73,6 +73,7 @@ const reagentResults = document.querySelector('#reagentResults');
 const totalVolumeResult = document.querySelector('#totalVolumeResult');
 const phrodoResult = document.querySelector('#phrodoResult');
 const pbsResult = document.querySelector('#pbsResult');
+const aliquotResult = document.querySelector('#aliquotResult');
 const loadPhrodoButton = document.querySelector('#loadPhrodoFromPlate');
 
 let plateMaps = [];
@@ -332,10 +333,19 @@ async function copyPlateTables() {
   }
 }
 
-async function copyDilutionTable() {
+async function copyDilutionResults() {
+  if (!latestDilutionResults.length) {
+    dilutionError.textContent = 'Run the calculator before copying results.';
+    return;
+  }
+
   const rows = [
-    ['Test Article', 'Stock Concentration (µM)'],
-    ...dilutionRows.map((row) => [row.testArticle || '', row.stockConcentration || '']),
+    ['Test Article', 'Source Volume (µL)', 'PBS Volume (µL)'],
+    ...latestDilutionResults.map((result) => [
+      result.test_article,
+      String(result.source_volume_uL),
+      String(result.diluent_volume_uL),
+    ]),
   ];
 
   const text = rows.map((line) => line.join('\t')).join('\n');
@@ -343,7 +353,7 @@ async function copyDilutionTable() {
     await navigator.clipboard.writeText(text);
     dilutionError.textContent = '';
   } catch (error) {
-    dilutionError.textContent = 'Unable to copy the concentration table to the clipboard.';
+    dilutionError.textContent = 'Unable to copy the dilution results to the clipboard.';
   }
 }
 
@@ -526,6 +536,7 @@ function prepareWorkbookSheets() {
     phrodoRows.push(['Total Volume (µL)', String(latestPhrodoResult.total_volume_uL)]);
     phrodoRows.push(['pHrodo Volume (µL)', String(latestPhrodoResult.phrodo_volume_uL)]);
     phrodoRows.push(['PBS Volume (µL)', String(latestPhrodoResult.diluent_volume_uL)]);
+    phrodoRows.push(['Aliquot Volume (µL)', String(latestPhrodoResult.aliquot_volume_uL)]);
   }
 
   sheets.push({
@@ -836,11 +847,16 @@ async function calculatePhrodo() {
     totalVolumeResult.textContent = `${data.total_volume_uL} µL`;
     phrodoResult.textContent = `${data.phrodo_volume_uL} µL`;
     pbsResult.textContent = `${data.diluent_volume_uL} µL`;
+    aliquotResult.textContent = `${data.aliquot_volume_uL} µL`;
     reagentResults.classList.remove('hidden');
   } catch (error) {
     reagentError.textContent = error.message;
     reagentResults.classList.add('hidden');
     latestPhrodoResult = null;
+    totalVolumeResult.textContent = '';
+    phrodoResult.textContent = '';
+    pbsResult.textContent = '';
+    aliquotResult.textContent = '';
   }
 }
 
@@ -855,7 +871,7 @@ exportCsvButton.addEventListener('click', exportCsv);
 copyCsvButton.addEventListener('click', copyCsv);
 copyPlateTablesButton.addEventListener('click', copyPlateTables);
 exportXlsxButton.addEventListener('click', exportXlsx);
-copyDilutionTableButton.addEventListener('click', copyDilutionTable);
+copyDilutionResultsButton.addEventListener('click', copyDilutionResults);
 resetDilutionTableButton.addEventListener('click', resetDilutionTable);
 loadArticlesButton.addEventListener('click', () => {
   if (!latestPlateInputs.testArticles.length) {

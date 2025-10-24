@@ -50,7 +50,7 @@ def _vertical_pairs() -> List[Pair]:
     return pairs
 
 
-def _assignment_pairs(orientation: str) -> Tuple[List[Pair], List[Pair]]:
+def _assignment_pairs(orientation: str) -> List[Pair]:
     if orientation == "vertical":
         pairs = _vertical_pairs()
     else:
@@ -59,7 +59,7 @@ def _assignment_pairs(orientation: str) -> Tuple[List[Pair], List[Pair]]:
     if len(pairs) < 2:
         raise ValueError("Unable to resolve plate layout for the requested orientation.")
 
-    return pairs[:-2], pairs[-2:]
+    return pairs
 
 
 def _format_well_id(row: str, column: int) -> str:
@@ -76,8 +76,8 @@ def _assign_well(row: str, column: int, label: str, cell_line: str, timepoint: f
         "timepoint": timepoint,
     }
 def _validate_capacity(test_article_count: int, orientation: str) -> None:
-    article_pairs, _ = _assignment_pairs(orientation)
-    if test_article_count > len(article_pairs):
+    available_pairs = _assignment_pairs(orientation)
+    if test_article_count + 2 > len(available_pairs):
         raise ValueError(
             "The selected number of test articles exceeds the capacity of a 96-well plate."
         )
@@ -92,7 +92,7 @@ def generate_plate_maps(
 ) -> List[Dict[str, object]]:
     _validate_capacity(len(test_articles), orientation)
 
-    article_pairs, control_pairs = _assignment_pairs(orientation)
+    assignment_pairs = _assignment_pairs(orientation)
 
     plates: List[Dict[str, object]] = []
 
@@ -103,8 +103,10 @@ def generate_plate_maps(
             wells.append(_assign_well("A", 1, NEGATIVE_CONTROL, cell_line, timepoint))
             wells.append(_assign_well("A", 2, NEGATIVE_CONTROL, cell_line, timepoint))
 
-            for index, article in enumerate(test_articles):
-                first, second = article_pairs[index]
+            pair_index = 0
+            for article in test_articles:
+                first, second = assignment_pairs[pair_index]
+                pair_index += 1
                 wells.append(
                     _assign_well(first[0], first[1], article, cell_line, timepoint)
                 )
@@ -112,8 +114,14 @@ def generate_plate_maps(
                     _assign_well(second[0], second[1], article, cell_line, timepoint)
                 )
 
+            if pair_index + 2 > len(assignment_pairs):
+                raise ValueError(
+                    "Plate layout does not have sufficient space for control wells."
+                )
+
             for control_label, pair in zip(
-                (LIVE_DEAD_CONTROL, UNSTAINED_CONTROL), control_pairs
+                (LIVE_DEAD_CONTROL, UNSTAINED_CONTROL),
+                assignment_pairs[pair_index : pair_index + 2],
             ):
                 first, second = pair
                 wells.append(
@@ -122,6 +130,8 @@ def generate_plate_maps(
                 wells.append(
                     _assign_well(second[0], second[1], control_label, cell_line, timepoint)
                 )
+
+            pair_index += 2
 
             wells.sort(
                 key=lambda well: (
@@ -193,9 +203,11 @@ def calculate_phrodo_requirements(
     total_volume = total_conditions * volume_per_replicate_uL * overage_multiplier
     phrodo_volume = total_volume / 40
     diluent_volume = total_volume - phrodo_volume
+    aliquot_volume = total_volume / 8
 
     return {
         "total_volume_uL": round(total_volume, 2),
         "phrodo_volume_uL": round(phrodo_volume, 2),
         "diluent_volume_uL": round(diluent_volume, 2),
+        "aliquot_volume_uL": round(aliquot_volume, 2),
     }
