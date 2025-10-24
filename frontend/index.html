@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Antibody Assay Setup</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="page-header">
+      <div class="container">
+        <h1>Antibody Assay Setup</h1>
+        <p>Generate plate maps, dilution plans, and reagent requirements.</p>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="card">
+        <div class="section-header">
+          <div>
+            <h2>Plate Map Generator</h2>
+            <p>Enter lists separated by commas or new lines.</p>
+          </div>
+          <button id="generatePlateMap" class="btn btn-primary">Generate Plate Map</button>
+        </div>
+        <div class="grid">
+          <label>
+            <span>Test Articles</span>
+            <textarea id="testArticles" rows="4" placeholder="HA-00059, HA-00061, HA-00390"></textarea>
+          </label>
+          <label>
+            <span>Cell Lines</span>
+            <textarea id="cellLines" rows="4">KPL4
+NCIN87</textarea>
+          </label>
+          <label>
+            <span>Timepoints (hours)</span>
+            <textarea id="timepoints" rows="4">0
+4</textarea>
+          </label>
+          <label>
+            <span>Fill Orientation</span>
+            <select id="orientation">
+              <option value="horizontal">Horizontal</option>
+              <option value="vertical">Vertical</option>
+            </select>
+          </label>
+        </div>
+        <p id="plateError" class="error"></p>
+      </section>
+
+      <section id="plateResults" class="card hidden">
+        <div class="section-header">
+          <div>
+            <h2>Plate Maps</h2>
+            <p id="plateSummary"></p>
+          </div>
+          <div class="button-row">
+            <button id="exportCsv" class="btn">Export CSV</button>
+            <button id="copyCsv" class="btn">Copy CSV</button>
+            <button id="copyPlateTables" class="btn">Copy 8×12 Table</button>
+          </div>
+        </div>
+        <div id="plateContainer" class="plate-container"></div>
+      </section>
+
+      <section class="card">
+        <div class="section-header">
+          <div>
+            <h2>Concentration Calculator</h2>
+            <p>Compute source and PBS volumes for assay dilutions.</p>
+          </div>
+          <div class="button-row">
+            <button id="loadArticlesFromPlate" class="btn">Use Plate Articles</button>
+            <button id="calculateDilutions" class="btn btn-primary">Calculate Dilutions</button>
+          </div>
+        </div>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Test Article</th>
+                <th>Stock Concentration (µM)</th>
+              </tr>
+            </thead>
+            <tbody id="dilutionTableBody"></tbody>
+          </table>
+        </div>
+        <button id="addDilutionRow" class="btn">Add Row</button>
+
+        <div class="grid">
+          <label>
+            <span>Desired Final Concentration (µM)</span>
+            <input id="finalConcentration" type="number" min="0" value="10" />
+          </label>
+          <label>
+            <span>Total Assay Volume (µL)</span>
+            <input id="totalVolume" type="number" min="0" value="100" />
+          </label>
+        </div>
+        <p id="dilutionError" class="error"></p>
+
+        <div id="dilutionResults" class="table-wrapper hidden">
+          <table>
+            <thead>
+              <tr>
+                <th>Test Article</th>
+                <th>Source Volume (µL)</th>
+                <th>PBS Volume (µL)</th>
+              </tr>
+            </thead>
+            <tbody id="dilutionResultsBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="section-header">
+          <div>
+            <h2>pHrodo Calculator</h2>
+            <p>Estimate pHrodo and PBS volumes with configurable overage.</p>
+          </div>
+          <div class="button-row">
+            <button id="loadPhrodoFromPlate" class="btn">Use Plate Setup</button>
+            <button id="calculatePhrodo" class="btn btn-primary">Calculate</button>
+          </div>
+        </div>
+        <div class="grid">
+          <label>
+            <span>Number of Timepoints</span>
+            <input id="reagentTimepoints" type="number" min="1" />
+          </label>
+          <label>
+            <span>Number of Test Articles</span>
+            <input id="reagentArticles" type="number" min="1" />
+          </label>
+          <label>
+            <span>Number of Cell Lines</span>
+            <input id="reagentCellLines" type="number" min="1" />
+          </label>
+          <label>
+            <span>Replicates per Condition</span>
+            <input id="reagentReplicates" type="number" min="1" value="2" />
+          </label>
+          <label>
+            <span>Volume per Replicate (µL)</span>
+            <input id="reagentVolume" type="number" min="0" step="0.01" />
+          </label>
+          <label>
+            <span>Overage (%)</span>
+            <input id="reagentOverage" type="number" min="0" step="0.1" value="10" />
+          </label>
+        </div>
+        <p id="reagentError" class="error"></p>
+
+        <div id="reagentResults" class="reagent-results hidden">
+          <div>
+            <p class="label">Total Volume</p>
+            <p id="totalVolumeResult" class="value"></p>
+          </div>
+          <div>
+            <p class="label">pHrodo Volume</p>
+            <p id="phrodoResult" class="value"></p>
+          </div>
+          <div>
+            <p class="label">PBS Volume</p>
+            <p id="pbsResult" class="value"></p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
