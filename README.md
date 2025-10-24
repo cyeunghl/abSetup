@@ -22,7 +22,13 @@ Serve the static frontend with any web server. For example, using Python:
 python -m http.server 5173 --directory frontend
 ```
 
-Then open `http://localhost:5173` in your browser. The frontend communicates directly with the backend at `http://localhost:8000`.
+Then open `http://localhost:5173` in your browser. The frontend automatically targets the backend at `http://localhost:8000` when running locally.
+
+If you are using a remote development environment (such as GitHub Codespaces) or have the API exposed on a different host, append `?apiBase=<url>` to the frontend URL to override the detected API location. For example:
+
+```
+https://<your-env>-5173.preview.app.github.dev/?apiBase=https://<your-env>-8000.preview.app.github.dev
+```
 
 ## Features
 

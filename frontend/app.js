@@ -1,4 +1,36 @@
-const API_BASE = 'http://localhost:8000';
+function inferApiBase() {
+  const params = new URLSearchParams(window.location.search);
+  const override = params.get('apiBase');
+  if (override) {
+    return override.trim().replace(/\/$/, '');
+  }
+
+  if (window.APP_CONFIG && typeof window.APP_CONFIG.apiBase === 'string') {
+    return window.APP_CONFIG.apiBase.trim().replace(/\/$/, '');
+  }
+
+  const { protocol, hostname, port } = window.location;
+
+  if (protocol.startsWith('http')) {
+    if (hostname.endsWith('.app.github.dev')) {
+      return `${protocol}//${hostname.replace(/-\d+(?=\.)/, '-8000')}`;
+    }
+
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      return `${protocol}//${hostname}:8000`;
+    }
+
+    if (port && port !== '80' && port !== '443') {
+      return `${protocol}//${hostname}:${port}`;
+    }
+
+    return `${protocol}//${hostname}`;
+  }
+
+  return 'http://localhost:8000';
+}
+
+const API_BASE = inferApiBase();
 
 const ROW_LABELS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
 const COLUMN_LABELS = Array.from({ length: 12 }, (_, index) => index + 1);
