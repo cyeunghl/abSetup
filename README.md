@@ -1,30 +1,28 @@
 # Antibody Assay Setup Toolkit
 
-This project provides a small FastAPI backend and a React + Tailwind frontend for planning antibody assay plates, dilution calculations, and mastermix preparation.
+This project provides a lightweight Python backend and a static frontend for planning antibody assay plates, dilution calculations, and mastermix preparation.
 
 ## Getting Started
 
 ### Backend
 
+The backend relies only on the Python standard library. Start it with:
+
 ```bash
-cd backend
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload
+python backend/app/main.py
 ```
 
 The API will be served on `http://localhost:8000`.
 
 ### Frontend
 
+Serve the static frontend with any web server. For example, using Python:
+
 ```bash
-cd frontend
-npm install
-npm run dev
+python -m http.server 5173 --directory frontend
 ```
 
-The development server runs on `http://localhost:5173` and proxies API requests to the FastAPI backend.
+Then open `http://localhost:5173` in your browser. The frontend communicates directly with the backend at `http://localhost:8000`.
 
 ## Features
 
