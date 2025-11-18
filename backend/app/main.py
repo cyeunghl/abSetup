@@ -113,7 +113,7 @@ VALID_ORIENTATIONS = {"horizontal", "vertical"}
 
 def _parse_plate_map_payload(
     payload: Dict[str, Any]
-) -> Tuple[List[str], List[str], List[float], str, int]:
+) -> Tuple[List[str], List[str], List[float], str, int, bool, bool, bool]:
     test_articles = _validate_test_articles(
         _ensure_list_of_strings("test_articles", payload.get("test_articles"))
     )
@@ -133,7 +133,16 @@ def _parse_plate_map_payload(
         raise ValueError("'replicates' must be greater than zero")
     if replicates > MAX_PLATE_COLUMNS:
         raise ValueError("'replicates' cannot exceed the number of plate columns")
-    return test_articles, cell_lines, timepoints, orientation, replicates
+    include_live_dead = payload.get("include_live_dead", True)
+    if not isinstance(include_live_dead, bool):
+        raise ValueError("'include_live_dead' must be a boolean value")
+    include_unstained = payload.get("include_unstained", True)
+    if not isinstance(include_unstained, bool):
+        raise ValueError("'include_unstained' must be a boolean value")
+    condense_cell_lines = payload.get("condense_cell_lines", False)
+    if not isinstance(condense_cell_lines, bool):
+        raise ValueError("'condense_cell_lines' must be a boolean value")
+    return test_articles, cell_lines, timepoints, orientation, replicates, include_live_dead, include_unstained, condense_cell_lines
 
 
 def _parse_dilution_payload(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], float, float]:
@@ -273,6 +282,9 @@ class AssayRequestHandler(BaseHTTPRequestHandler):
             timepoints,
             orientation,
             replicates,
+            include_live_dead,
+            include_unstained,
+            condense_cell_lines,
         ) = _parse_plate_map_payload(payload)
         plates = generate_plate_maps(
             test_articles,
@@ -280,6 +292,9 @@ class AssayRequestHandler(BaseHTTPRequestHandler):
             timepoints,
             orientation=orientation,
             replicates=replicates,
+            include_live_dead=include_live_dead,
+            include_unstained=include_unstained,
+            condense_cell_lines=condense_cell_lines,
         )
         _json_response(self, HTTPStatus.OK, {"plates": plates})
 

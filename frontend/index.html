@@ -53,6 +53,20 @@ NCIN87</textarea>
               <option value="vertical">Vertical</option>
             </select>
           </label>
+          <div class="checkbox-group">
+            <label class="checkbox-label">
+              <input type="checkbox" id="includeLiveDead" checked />
+              <span>Include Live/Dead Control</span>
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" id="includeUnstained" checked />
+              <span>Include Unstained Control</span>
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" id="condenseCellLines" />
+              <span>Condense Cell Lines (combine multiple cell lines on one plate if space allows)</span>
+            </label>
+          </div>
         </div>
         <p id="plateError" class="error"></p>
       </section>

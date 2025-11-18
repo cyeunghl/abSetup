@@ -45,6 +45,9 @@ const testArticlesInput = document.querySelector('#testArticles');
 const cellLinesInput = document.querySelector('#cellLines');
 const timepointsInput = document.querySelector('#timepoints');
 const orientationSelect = document.querySelector('#orientation');
+const includeLiveDeadCheckbox = document.querySelector('#includeLiveDead');
+const includeUnstainedCheckbox = document.querySelector('#includeUnstained');
+const condenseCellLinesCheckbox = document.querySelector('#condenseCellLines');
 const plateError = document.querySelector('#plateError');
 const plateResultsSection = document.querySelector('#plateResults');
 const plateSummary = document.querySelector('#plateSummary');
@@ -216,6 +219,9 @@ async function generatePlateMap() {
         timepoints,
         orientation,
         replicates,
+        include_live_dead: includeLiveDeadCheckbox.checked,
+        include_unstained: includeUnstainedCheckbox.checked,
+        condense_cell_lines: condenseCellLinesCheckbox.checked,
       }),
     });
 
@@ -277,6 +283,20 @@ function buildWellLookup(wells) {
   return lookup;
 }
 
+function getCellLineDisplay(plate) {
+  if (plate.cell_lines && Array.isArray(plate.cell_lines)) {
+    return plate.cell_lines.join(', ');
+  }
+  return plate.cell_line || '';
+}
+
+function getCellLineForFilename(plate) {
+  if (plate.cell_lines && Array.isArray(plate.cell_lines)) {
+    return plate.cell_lines.join('_');
+  }
+  return plate.cell_line || 'plate';
+}
+
 function renderPlateMaps() {
   plateContainer.innerHTML = '';
 
@@ -291,7 +311,8 @@ function renderPlateMaps() {
   const header = document.createElement('div');
   header.className = 'plate-header';
   const title = document.createElement('h3');
-  title.textContent = `${plate.cell_line} · ${plate.timepoint} hr`;
+  const cellLineDisplay = getCellLineDisplay(plate);
+  title.textContent = `${cellLineDisplay} · ${plate.timepoint} hr`;
   const subtitle = document.createElement('p');
   const replicateCountRaw = Number(plate.replicates || getLatestReplicates() || 1);
   const replicateCount = !Number.isNaN(replicateCountRaw) && replicateCountRaw > 0 ? replicateCountRaw : 1;
@@ -363,18 +384,51 @@ function renderPlateMaps() {
 
 function buildCsvRows() {
   const rows = [['WellID', 'Row', 'Column', 'Test Article', 'Cell Line', 'Timepoint (hr)']];
+  
+  // Collect all wells with their cell line information
+  const allWells = [];
   plateMaps.forEach((plate) => {
     plate.wells.forEach((well) => {
-      rows.push([
-        well.well_id,
-        well.row,
-        well.column,
-        well.test_article,
-        plate.cell_line,
-        well.timepoint,
-      ]);
+      allWells.push({
+        ...well,
+        // Use well.cell_line if available (from backend), otherwise fall back to plate cell_line
+        cell_line: well.cell_line || (plate.cell_line || (plate.cell_lines && plate.cell_lines[0]) || ''),
+      });
     });
   });
+  
+  // Sort by cell line, then by test article, then by row, then by column
+  allWells.sort((a, b) => {
+    // First sort by cell line
+    if (a.cell_line !== b.cell_line) {
+      return a.cell_line.localeCompare(b.cell_line);
+    }
+    // Then by test article
+    if (a.test_article !== b.test_article) {
+      return a.test_article.localeCompare(b.test_article);
+    }
+    // Then by row
+    const rowA = ROW_LABELS.indexOf(a.row);
+    const rowB = ROW_LABELS.indexOf(b.row);
+    if (rowA !== rowB) {
+      return rowA - rowB;
+    }
+    // Finally by column
+    return a.column - b.column;
+  });
+  
+  // Add sorted wells to rows
+  allWells.forEach((well) => {
+    rows.push([
+      well.well_id,
+      well.row,
+      well.column,
+      well.test_article,
+      well.cell_line,
+      well.timepoint,
+    ]);
+  });
+  
   return rows;
 }
 
@@ -414,15 +468,34 @@ function exportCsv() {
 }
 
 async function copyCsv() {
-  if (!plateMaps.length) return;
-  const rows = buildPlateRowsWithMetadata();
-  const csv = rows.map((line) => line.join(',')).join('\n');
-  await navigator.clipboard.writeText(csv);
+  if (!plateMaps.length) {
+    plateError.textContent = 'Generate a plate map before copying.';
+    return;
+  }
+  try {
+    const rows = buildPlateRowsWithMetadata();
+    // Escape commas and quotes in CSV values
+    const csv = rows.map((line) => 
+      line.map((cell) => {
+        const str = String(cell || '');
+        // If cell contains comma, quote, or newline, wrap in quotes and escape quotes
+        if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+          return `"${str.replace(/"/g, '""')}"`;
+        }
+        return str;
+      }).join(',')
+    ).join('\n');
+    await navigator.clipboard.writeText(csv);
+    plateError.textContent = '';
+  } catch (error) {
+    plateError.textContent = 'Unable to copy CSV to the clipboard.';
+  }
 }
 
 function buildPlateTable(plate) {
   const lookup = buildWellLookup(plate.wells);
-  const lines = [`${plate.cell_line} · ${plate.timepoint} hr`];
+  const cellLineDisplay = getCellLineDisplay(plate);
+  const lines = [`${cellLineDisplay} · ${plate.timepoint} hr`];
   const replicates = Number(plate.replicates || getLatestReplicates());
   if (!Number.isNaN(replicates) && replicates > 0) {
     lines.push(`Replicates per Condition: ${replicates}`);
@@ -441,24 +514,26 @@ function buildPlateTable(plate) {
 
 async function copyPlateTables() {
   if (!plateMaps.length) {
+    plateError.textContent = 'Generate a plate map before copying.';
     return;
   }
-  const metadataLines = [];
-  const experimentName = experimentNameInput?.value?.trim();
-  if (experimentName) {
-    metadataLines.push(`Experiment: ${experimentName}`);
-  }
-  const replicates = getLatestReplicates();
-  if (replicates) {
-    metadataLines.push(`Replicates per Condition: ${replicates}`);
-  }
-  const prefix = metadataLines.length ? `${metadataLines.join('\n')}\n\n` : '';
-  const tables = prefix + plateMaps.map((plate) => buildPlateTable(plate)).join('\n\n');
   try {
+    const metadataLines = [];
+    const experimentName = experimentNameInput?.value?.trim();
+    if (experimentName) {
+      metadataLines.push(`Experiment: ${experimentName}`);
+    }
+    const replicates = getLatestReplicates();
+    if (replicates) {
+      metadataLines.push(`Replicates per Condition: ${replicates}`);
+    }
+    const prefix = metadataLines.length ? `${metadataLines.join('\n')}\n\n` : '';
+    const tables = prefix + plateMaps.map((plate) => buildPlateTable(plate)).join('\n\n');
     await navigator.clipboard.writeText(tables);
     plateError.textContent = '';
   } catch (error) {
     plateError.textContent = 'Unable to copy plate tables to the clipboard.';
+    console.error('Error copying plate tables:', error);
   }
 }
 
@@ -597,7 +672,8 @@ function prepareWorkbookSheets() {
   });
 
   plateMaps.forEach((plate, index) => {
-    const rows = [[`${plate.cell_line} · ${plate.timepoint} hr`]];
+    const cellLineDisplay = getCellLineDisplay(plate);
+    const rows = [[`${cellLineDisplay} · ${plate.timepoint} hr`]];
     const replicates = Number(plate.replicates || getLatestReplicates());
     if (!Number.isNaN(replicates) && replicates > 0) {
       rows.push([`Replicates per Condition: ${replicates}`]);
@@ -615,8 +691,8 @@ function prepareWorkbookSheets() {
       rows.push(rowValues);
     });
 
-    const baseName = plate.cell_line
-      ? `${plate.cell_line}_${plate.timepoint}h`
+    const baseName = getCellLineForFilename(plate)
+      ? `${getCellLineForFilename(plate)}_${plate.timepoint}h`
       : `Plate${index + 1}`;
     sheets.push({
       name: sanitizeSheetName(baseName, usedNames),
