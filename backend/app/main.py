@@ -107,13 +107,41 @@ def _validate_test_articles(articles: List[str]) -> List[str]:
     return validated
 
 
-def _parse_plate_map_payload(payload: Dict[str, Any]) -> Tuple[List[str], List[str], List[float]]:
+VALID_ORIENTATIONS = {"horizontal", "vertical"}
+
+
+def _parse_plate_map_payload(
+    payload: Dict[str, Any]
+) -> Tuple[List[str], List[str], List[float], str, int, bool, bool, bool]:
     test_articles = _validate_test_articles(
         _ensure_list_of_strings("test_articles", payload.get("test_articles"))
     )
     cell_lines = _ensure_list_of_strings("cell_lines", payload.get("cell_lines"))
     timepoints = _ensure_list_of_numbers("timepoints", payload.get("timepoints"))
-    return test_articles, cell_lines, timepoints
+    orientation_raw = payload.get("orientation", "horizontal")
+    if not isinstance(orientation_raw, str):
+        raise ValueError("'orientation' must be a string value")
+    orientation = orientation_raw.strip().lower() or "horizontal"
+    if orientation not in VALID_ORIENTATIONS:
+        raise ValueError("'orientation' must be either 'horizontal' or 'vertical'")
+    replicates_raw = payload.get("replicates", 2)
+    if not isinstance(replicates_raw, (int, float)):
+        raise ValueError("'replicates' must be a positive number")
+    replicates = int(replicates_raw)
+    if replicates <= 0:
+        raise ValueError("'replicates' must be greater than zero")
+    if replicates > MAX_PLATE_COLUMNS:
+        raise ValueError("'replicates' cannot exceed the number of plate columns")
+    include_live_dead = payload.get("include_live_dead", True)
+    if not isinstance(include_live_dead, bool):
+        raise ValueError("'include_live_dead' must be a boolean value")
+    include_unstained = payload.get("include_unstained", True)
+    if not isinstance(include_unstained, bool):
+        raise ValueError("'include_unstained' must be a boolean value")
+    condense_cell_lines = payload.get("condense_cell_lines", False)
+    if not isinstance(condense_cell_lines, bool):
+        raise ValueError("'condense_cell_lines' must be a boolean value")
+    return test_articles, cell_lines, timepoints, orientation, replicates, include_live_dead, include_unstained, condense_cell_lines
 
 
 def _parse_dilution_payload(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], float, float]:
@@ -235,8 +263,26 @@ class AssayRequestHandler(BaseHTTPRequestHandler):
             _json_error(self, HTTPStatus.BAD_REQUEST, str(exc))
 
     def _handle_plate_map(self, payload: Dict[str, Any]) -> None:
-        test_articles, cell_lines, timepoints = _parse_plate_map_payload(payload)
-        plates = generate_plate_maps(test_articles, cell_lines, timepoints)
+        (
+            test_articles,
+            cell_lines,
+            timepoints,
+            orientation,
+            replicates,
+            include_live_dead,
+            include_unstained,
+            condense_cell_lines,
+        ) = _parse_plate_map_payload(payload)
+        plates = generate_plate_maps(
+            test_articles,
+            cell_lines,
+            timepoints,
+            orientation=orientation,
+            replicates=replicates,
+            include_live_dead=include_live_dead,
+            include_unstained=include_unstained,
+            condense_cell_lines=condense_cell_lines,
+        )
         _json_response(self, HTTPStatus.OK, {"plates": plates})
 
     def _handle_dilutions(self, payload: Dict[str, Any]) -> None:

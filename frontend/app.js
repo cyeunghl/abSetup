@@ -42,6 +42,10 @@ const COLUMN_LABELS = Array.from({ length: 12 }, (_, index) => index + 1);
 const testArticlesInput = document.querySelector('#testArticles');
 const cellLinesInput = document.querySelector('#cellLines');
 const timepointsInput = document.querySelector('#timepoints');
+const orientationSelect = document.querySelector('#orientation');
+const includeLiveDeadCheckbox = document.querySelector('#includeLiveDead');
+const includeUnstainedCheckbox = document.querySelector('#includeUnstained');
+const condenseCellLinesCheckbox = document.querySelector('#condenseCellLines');
 const plateError = document.querySelector('#plateError');
 const plateResultsSection = document.querySelector('#plateResults');
 const plateSummary = document.querySelector('#plateSummary');
@@ -136,6 +140,11 @@ async function generatePlateMap() {
         test_articles: testArticles,
         cell_lines: cellLines,
         timepoints,
+        orientation,
+        replicates,
+        include_live_dead: includeLiveDeadCheckbox.checked,
+        include_unstained: includeUnstainedCheckbox.checked,
+        condense_cell_lines: condenseCellLinesCheckbox.checked,
       }),
     });
 
@@ -169,38 +178,49 @@ function buildWellLookup(wells) {
   return lookup;
 }
 
+function getCellLineDisplay(plate) {
+  if (plate.cell_lines && Array.isArray(plate.cell_lines)) {
+    return plate.cell_lines.join(', ');
+  }
+  return plate.cell_line || '';
+}
+
+function getCellLineForFilename(plate) {
+  if (plate.cell_lines && Array.isArray(plate.cell_lines)) {
+    return plate.cell_lines.join('_');
+  }
+  return plate.cell_line || 'plate';
+}
+
 function renderPlateMaps() {
   plateContainer.innerHTML = '';
 
-  plateMaps.forEach((plate) => {
-    const plateElement = document.createElement('div');
-    plateElement.className = 'plate';
+  if (!plateMaps.length) {
+    return;
+  }
 
-    const header = document.createElement('div');
-    header.className = 'plate-header';
-    const title = document.createElement('h3');
-    title.textContent = `${plate.cell_line} · ${plate.timepoint} hr`;
-    const subtitle = document.createElement('p');
-    subtitle.textContent = 'Controls occupy A1–A2 and the final four wells. Technical duplicates applied automatically.';
-    subtitle.className = 'subtle';
-    header.appendChild(title);
-    header.appendChild(subtitle);
+  const plate = plateMaps[0];
+  const plateElement = document.createElement('div');
+  plateElement.className = 'plate';
 
-    const gridWrapper = document.createElement('div');
-    gridWrapper.className = 'plate-grid';
-    const table = document.createElement('table');
+  const header = document.createElement('div');
+  header.className = 'plate-header';
+  const title = document.createElement('h3');
+  const cellLineDisplay = getCellLineDisplay(plate);
+  title.textContent = `${cellLineDisplay} · ${plate.timepoint} hr`;
+  const subtitle = document.createElement('p');
+  const replicateCountRaw = Number(plate.replicates || getLatestReplicates() || 1);
+  const replicateCount = !Number.isNaN(replicateCountRaw) && replicateCountRaw > 0 ? replicateCountRaw : 1;
+  const controlRange = replicateCount > 1 ? `1–${replicateCount}` : '1';
+  const replicateLabel = `${replicateCount} replicate${replicateCount === 1 ? '' : 's'}`;
+  subtitle.textContent = `Negative controls occupy row A columns ${controlRange}. ${replicateLabel} per condition are placed automatically and controls follow the final test article.`;
+  subtitle.className = 'subtle';
+  header.appendChild(title);
+  header.appendChild(subtitle);
 
-    const thead = document.createElement('thead');
-    const headerRow = document.createElement('tr');
-    const corner = document.createElement('th');
-    corner.textContent = 'Row';
-    headerRow.appendChild(corner);
-    COLUMN_LABELS.forEach((column) => {
-      const th = document.createElement('th');
-      th.textContent = column;
-      headerRow.appendChild(th);
-    });
-    thead.appendChild(headerRow);
+  const gridWrapper = document.createElement('div');
+  gridWrapper.className = 'plate-grid';
+  const table = document.createElement('table');
 
     const tbody = document.createElement('tbody');
     const lookup = buildWellLookup(plate.wells);
@@ -241,18 +261,51 @@ function renderPlateMaps() {
 
 function buildCsvRows() {
   const rows = [['WellID', 'Row', 'Column', 'Test Article', 'Cell Line', 'Timepoint (hr)']];
+  
+  // Collect all wells with their cell line information
+  const allWells = [];
   plateMaps.forEach((plate) => {
     plate.wells.forEach((well) => {
-      rows.push([
-        well.well_id,
-        well.row,
-        well.column,
-        well.test_article,
-        plate.cell_line,
-        well.timepoint,
-      ]);
+      allWells.push({
+        ...well,
+        // Use well.cell_line if available (from backend), otherwise fall back to plate cell_line
+        cell_line: well.cell_line || (plate.cell_line || (plate.cell_lines && plate.cell_lines[0]) || ''),
+      });
     });
   });
+  
+  // Sort by cell line, then by test article, then by row, then by column
+  allWells.sort((a, b) => {
+    // First sort by cell line
+    if (a.cell_line !== b.cell_line) {
+      return a.cell_line.localeCompare(b.cell_line);
+    }
+    // Then by test article
+    if (a.test_article !== b.test_article) {
+      return a.test_article.localeCompare(b.test_article);
+    }
+    // Then by row
+    const rowA = ROW_LABELS.indexOf(a.row);
+    const rowB = ROW_LABELS.indexOf(b.row);
+    if (rowA !== rowB) {
+      return rowA - rowB;
+    }
+    // Finally by column
+    return a.column - b.column;
+  });
+  
+  // Add sorted wells to rows
+  allWells.forEach((well) => {
+    rows.push([
+      well.well_id,
+      well.row,
+      well.column,
+      well.test_article,
+      well.cell_line,
+      well.timepoint,
+    ]);
+  });
+  
   return rows;
 }
 
@@ -272,10 +325,475 @@ function exportCsv() {
 }
 
 async function copyCsv() {
-  if (!plateMaps.length) return;
-  const rows = buildCsvRows();
-  const csv = rows.map((line) => line.join(',')).join('\n');
-  await navigator.clipboard.writeText(csv);
+  if (!plateMaps.length) {
+    plateError.textContent = 'Generate a plate map before copying.';
+    return;
+  }
+  try {
+    const rows = buildPlateRowsWithMetadata();
+    // Escape commas and quotes in CSV values
+    const csv = rows.map((line) => 
+      line.map((cell) => {
+        const str = String(cell || '');
+        // If cell contains comma, quote, or newline, wrap in quotes and escape quotes
+        if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+          return `"${str.replace(/"/g, '""')}"`;
+        }
+        return str;
+      }).join(',')
+    ).join('\n');
+    await navigator.clipboard.writeText(csv);
+    plateError.textContent = '';
+  } catch (error) {
+    plateError.textContent = 'Unable to copy CSV to the clipboard.';
+  }
+}
+
+function buildPlateTable(plate) {
+  const lookup = buildWellLookup(plate.wells);
+  const cellLineDisplay = getCellLineDisplay(plate);
+  const lines = [`${cellLineDisplay} · ${plate.timepoint} hr`];
+  const replicates = Number(plate.replicates || getLatestReplicates());
+  if (!Number.isNaN(replicates) && replicates > 0) {
+    lines.push(`Replicates per Condition: ${replicates}`);
+  }
+  lines.push(['Row', ...COLUMN_LABELS].join('\t'));
+  ROW_LABELS.forEach((row) => {
+    const rowValues = [row];
+    COLUMN_LABELS.forEach((column) => {
+      const well = lookup.get(`${row}${column}`);
+      rowValues.push(well ? well.test_article : '');
+    });
+    lines.push(rowValues.join('\t'));
+  });
+  return lines.join('\n');
+}
+
+async function copyPlateTables() {
+  if (!plateMaps.length) {
+    plateError.textContent = 'Generate a plate map before copying.';
+    return;
+  }
+  try {
+    const metadataLines = [];
+    const experimentName = experimentNameInput?.value?.trim();
+    if (experimentName) {
+      metadataLines.push(`Experiment: ${experimentName}`);
+    }
+    const replicates = getLatestReplicates();
+    if (replicates) {
+      metadataLines.push(`Replicates per Condition: ${replicates}`);
+    }
+    const prefix = metadataLines.length ? `${metadataLines.join('\n')}\n\n` : '';
+    const tables = prefix + plateMaps.map((plate) => buildPlateTable(plate)).join('\n\n');
+    await navigator.clipboard.writeText(tables);
+    plateError.textContent = '';
+  } catch (error) {
+    plateError.textContent = 'Unable to copy plate tables to the clipboard.';
+    console.error('Error copying plate tables:', error);
+  }
+}
+
+async function copyDilutionResults() {
+  if (!latestDilutionResults.length) {
+    dilutionError.textContent = 'Run the calculator before copying results.';
+    return;
+  }
+
+  const rows = [
+    ['Test Article', 'Source Volume (µL)', 'PBS Volume (µL)'],
+    ...latestDilutionResults.map((result) => [
+      result.test_article,
+      String(result.source_volume_uL),
+      String(result.diluent_volume_uL),
+    ]),
+  ];
+
+  const text = rows.map((line) => line.join('\t')).join('\n');
+  try {
+    await navigator.clipboard.writeText(text);
+    dilutionError.textContent = '';
+  } catch (error) {
+    dilutionError.textContent = 'Unable to copy the dilution results to the clipboard.';
+  }
+}
+
+function resetDilutionTable() {
+  dilutionRows = [{ testArticle: '', stockConcentration: '' }];
+  latestDilutionResults = [];
+  renderDilutionRows();
+  dilutionResultsSection.classList.add('hidden');
+  dilutionError.textContent = '';
+  finalConcentrationInput.value = '1.5';
+  totalVolumeInput.value = '100';
+}
+
+function sanitizeSheetName(base, usedNames) {
+  const invalidPattern = /[\\/?*\[\]:]/g;
+  let candidate = (base || 'Sheet').replace(invalidPattern, ' ').trim();
+  if (!candidate) {
+    candidate = 'Sheet';
+  }
+  if (candidate.length > 31) {
+    candidate = candidate.slice(0, 31);
+  }
+  let uniqueName = candidate;
+  let suffix = 1;
+  while (usedNames.has(uniqueName)) {
+    const extra = `_${suffix}`;
+    const baseLength = Math.min(candidate.length, 31 - extra.length);
+    uniqueName = `${candidate.slice(0, baseLength)}${extra}`;
+    suffix += 1;
+  }
+  usedNames.add(uniqueName);
+  return uniqueName;
+}
+
+function columnLabelFromIndex(index) {
+  let value = index;
+  let label = '';
+  while (value > 0) {
+    const remainder = (value - 1) % 26;
+    label = String.fromCharCode(65 + remainder) + label;
+    value = Math.floor((value - 1) / 26);
+  }
+  return label;
+}
+
+function escapeXml(text) {
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+const CRC32_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let i = 0; i < 256; i += 1) {
+    let crc = i;
+    for (let j = 0; j < 8; j += 1) {
+      if ((crc & 1) !== 0) {
+        crc = 0xedb88320 ^ (crc >>> 1);
+      } else {
+        crc >>>= 1;
+      }
+    }
+    table[i] = crc >>> 0;
+  }
+  return table;
+})();
+
+function crc32(data) {
+  let crc = 0xffffffff;
+  for (let index = 0; index < data.length; index += 1) {
+    const byte = data[index];
+    crc = CRC32_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function buildSheetXml(rows) {
+  const sheetRows = rows.map((cells, rowIndex) => {
+    const cellXml = cells
+      .map((cell, cellIndex) => {
+        const columnLabel = columnLabelFromIndex(cellIndex + 1);
+        const reference = `${columnLabel}${rowIndex + 1}`;
+        const value = cell === undefined || cell === null ? '' : cell;
+        return `<c r="${reference}" t="inlineStr"><is><t>${escapeXml(value)}</t></is></c>`;
+      })
+      .join('');
+    return `<row r="${rowIndex + 1}">${cellXml}</row>`;
+  });
+
+  return (
+    '<?xml version="1.0" encoding="UTF-8"?>' +
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+    `<sheetData>${sheetRows.join('')}</sheetData>` +
+    '</worksheet>'
+  );
+}
+
+function prepareWorkbookSheets() {
+  if (!plateMaps.length) {
+    throw new Error('Generate a plate map before exporting.');
+  }
+
+  const usedNames = new Set();
+  const sheets = [];
+
+  sheets.push({
+    name: sanitizeSheetName('plateWells', usedNames),
+    rows: buildPlateRowsWithMetadata(),
+  });
+
+  plateMaps.forEach((plate, index) => {
+    const cellLineDisplay = getCellLineDisplay(plate);
+    const rows = [[`${cellLineDisplay} · ${plate.timepoint} hr`]];
+    const replicates = Number(plate.replicates || getLatestReplicates());
+    if (!Number.isNaN(replicates) && replicates > 0) {
+      rows.push([`Replicates per Condition: ${replicates}`]);
+      rows.push([]);
+    }
+    rows.push(['Row', ...COLUMN_LABELS.map((value) => String(value))]);
+
+    const lookup = buildWellLookup(plate.wells);
+    ROW_LABELS.forEach((row) => {
+      const rowValues = [row];
+      COLUMN_LABELS.forEach((column) => {
+        const well = lookup.get(`${row}${column}`);
+        rowValues.push(well ? well.test_article : '');
+      });
+      rows.push(rowValues);
+    });
+
+    const baseName = getCellLineForFilename(plate)
+      ? `${getCellLineForFilename(plate)}_${plate.timepoint}h`
+      : `Plate${index + 1}`;
+    sheets.push({
+      name: sanitizeSheetName(baseName, usedNames),
+      rows,
+    });
+  });
+
+  const concentrationRows = [
+    ['Final concentration (µM)', finalConcentrationInput.value || ''],
+    ['Total assay volume (µL)', totalVolumeInput.value || ''],
+    [],
+    ['Test Article', 'Stock Concentration (µM)'],
+  ];
+
+  if (dilutionRows.length === 0) {
+    concentrationRows.push(['', '']);
+  } else {
+    dilutionRows.forEach((row) => {
+      concentrationRows.push([row.testArticle || '', row.stockConcentration || '']);
+    });
+  }
+
+  if (latestDilutionResults.length) {
+    concentrationRows.push([]);
+    concentrationRows.push(['Test Article', 'Source Volume (µL)', 'PBS Volume (µL)']);
+    latestDilutionResults.forEach((result) => {
+      concentrationRows.push([
+        result.test_article,
+        String(result.source_volume_uL),
+        String(result.diluent_volume_uL),
+      ]);
+    });
+  }
+
+  sheets.push({
+    name: sanitizeSheetName('concentrationCalculations', usedNames),
+    rows: concentrationRows,
+  });
+
+  const phrodoRows = [
+    ['Number of Timepoints', reagentTimepointsInput.value || ''],
+    ['Number of Test Articles', reagentArticlesInput.value || ''],
+    ['Number of Cell Lines', reagentCellLinesInput.value || ''],
+    ['Replicates per Condition', reagentReplicatesInput.value || ''],
+    ['Volume per Replicate (µL)', reagentVolumeInput.value || ''],
+    ['Overage (%)', reagentOverageInput.value || ''],
+  ];
+
+  if (latestPhrodoResult) {
+    phrodoRows.push([]);
+    phrodoRows.push(['Total Volume (µL)', String(latestPhrodoResult.total_volume_uL)]);
+    phrodoRows.push(['pHrodo Volume (µL)', String(latestPhrodoResult.phrodo_volume_uL)]);
+    phrodoRows.push(['PBS Volume (µL)', String(latestPhrodoResult.diluent_volume_uL)]);
+    phrodoRows.push(['Aliquot Volume (µL)', String(latestPhrodoResult.aliquot_volume_uL)]);
+  }
+
+  sheets.push({
+    name: sanitizeSheetName('pHrodo', usedNames),
+    rows: phrodoRows,
+  });
+
+  return sheets;
+}
+
+function createZip(files) {
+  const encoder = new TextEncoder();
+  const fileChunks = [];
+  const centralChunks = [];
+  let offset = 0;
+
+  files.forEach((file) => {
+    const nameBytes = encoder.encode(file.path);
+    const dataBytes =
+      typeof file.data === 'string' ? encoder.encode(file.data) : file.data;
+    const crc = crc32(dataBytes);
+
+    const localHeader = new Uint8Array(30 + nameBytes.length);
+    const localView = new DataView(localHeader.buffer);
+    localView.setUint32(0, 0x04034b50, true);
+    localView.setUint16(4, 20, true);
+    localView.setUint16(6, 0, true);
+    localView.setUint16(8, 0, true);
+    localView.setUint16(10, 0, true);
+    localView.setUint16(12, 0, true);
+    localView.setUint32(14, crc, true);
+    localView.setUint32(18, dataBytes.length, true);
+    localView.setUint32(22, dataBytes.length, true);
+    localView.setUint16(26, nameBytes.length, true);
+    localView.setUint16(28, 0, true);
+    localHeader.set(nameBytes, 30);
+
+    fileChunks.push(localHeader, dataBytes);
+
+    const centralHeader = new Uint8Array(46 + nameBytes.length);
+    const centralView = new DataView(centralHeader.buffer);
+    centralView.setUint32(0, 0x02014b50, true);
+    centralView.setUint16(4, 20, true);
+    centralView.setUint16(6, 20, true);
+    centralView.setUint16(8, 0, true);
+    centralView.setUint16(10, 0, true);
+    centralView.setUint16(12, 0, true);
+    centralView.setUint16(14, 0, true);
+    centralView.setUint32(16, crc, true);
+    centralView.setUint32(20, dataBytes.length, true);
+    centralView.setUint32(24, dataBytes.length, true);
+    centralView.setUint16(28, nameBytes.length, true);
+    centralView.setUint16(30, 0, true);
+    centralView.setUint16(32, 0, true);
+    centralView.setUint16(34, 0, true);
+    centralView.setUint16(36, 0, true);
+    centralView.setUint32(38, 0, true);
+    centralView.setUint32(42, offset, true);
+    centralHeader.set(nameBytes, 46);
+
+    centralChunks.push(centralHeader);
+
+    offset += localHeader.length + dataBytes.length;
+  });
+
+  const centralSize = centralChunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const endRecord = new Uint8Array(22);
+  const endView = new DataView(endRecord.buffer);
+  endView.setUint32(0, 0x06054b50, true);
+  endView.setUint16(4, 0, true);
+  endView.setUint16(6, 0, true);
+  endView.setUint16(8, files.length, true);
+  endView.setUint16(10, files.length, true);
+  endView.setUint32(12, centralSize, true);
+  endView.setUint32(16, offset, true);
+  endView.setUint16(20, 0, true);
+
+  const totalSize = offset + centralSize + endRecord.length;
+  const zipBuffer = new Uint8Array(totalSize);
+  let cursor = 0;
+  fileChunks.forEach((chunk) => {
+    zipBuffer.set(chunk, cursor);
+    cursor += chunk.length;
+  });
+  centralChunks.forEach((chunk) => {
+    zipBuffer.set(chunk, cursor);
+    cursor += chunk.length;
+  });
+  zipBuffer.set(endRecord, cursor);
+
+  return new Blob([zipBuffer], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+}
+
+function buildWorkbookBlob() {
+  const sheets = prepareWorkbookSheets();
+  const sheetEntries = sheets.map((sheet, index) => ({
+    ...sheet,
+    sheetId: index + 1,
+    relId: `rId${index + 1}`,
+    path: `xl/worksheets/sheet${index + 1}.xml`,
+  }));
+
+  const workbookXml =
+    '<?xml version="1.0" encoding="UTF-8"?>' +
+    '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+    '<sheets>' +
+    sheetEntries
+      .map(
+        (entry) =>
+          `<sheet name="${escapeXml(entry.name)}" sheetId="${entry.sheetId}" r:id="${entry.relId}"/>`,
+      )
+      .join('') +
+    '</sheets>' +
+    '</workbook>';
+
+  const workbookRels =
+    '<?xml version="1.0" encoding="UTF-8"?>' +
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+    sheetEntries
+      .map(
+        (entry) =>
+          `<Relationship Id="${entry.relId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${entry.sheetId}.xml"/>`,
+      )
+      .join('') +
+    '</Relationships>';
+
+  const contentTypes =
+    '<?xml version="1.0" encoding="UTF-8"?>' +
+    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+    '<Default Extension="xml" ContentType="application/xml"/>' +
+    '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
+    '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' +
+    sheetEntries
+      .map(
+        (entry) =>
+          `<Override PartName="/xl/worksheets/sheet${entry.sheetId}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`,
+      )
+      .join('') +
+    '</Types>';
+
+  const stylesXml =
+    '<?xml version="1.0" encoding="UTF-8"?>' +
+    '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+    '<fonts count="1"><font><name val="Arial"/><family val="2"/></font></fonts>' +
+    '<fills count="1"><fill><patternFill patternType="none"/></fill></fills>' +
+    '<borders count="1"><border/></borders>' +
+    '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
+    '<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>' +
+    '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>' +
+    '</styleSheet>';
+
+  const relationships =
+    '<?xml version="1.0" encoding="UTF-8"?>' +
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+    '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>' +
+    '</Relationships>';
+
+  const files = [
+    { path: '[Content_Types].xml', data: contentTypes },
+    { path: '_rels/.rels', data: relationships },
+    { path: 'xl/workbook.xml', data: workbookXml },
+    { path: 'xl/_rels/workbook.xml.rels', data: workbookRels },
+    { path: 'xl/styles.xml', data: stylesXml },
+  ];
+
+  sheetEntries.forEach((entry) => {
+    files.push({ path: entry.path, data: buildSheetXml(entry.rows) });
+  });
+
+  return createZip(files);
+}
+
+function exportXlsx() {
+  try {
+    const blob = buildWorkbookBlob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${getExportBaseName()}.xlsx`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    plateError.textContent = '';
+  } catch (error) {
+    plateError.textContent = error.message || 'Unable to generate the XLSX export.';
+  }
 }
 
 async function calculateDilutions() {
