@@ -18,9 +18,9 @@ If you are working in a remote development environment (e.g. GitHub Codespaces),
 
 ## Features
 
-- 96-well plate map generation with configurable replicates per condition, automatic control placement immediately after the final test article, horizontal/vertical filling, and default cell line/timepoint seeds.
-- Concentration calculator to compute source and PBS volumes with one-click population from the plate setup, bulk paste support, clipboard export, and instant reset.
-- pHrodo mastermix (pHrodo) calculator with configurable overage, one-click plate value imports, and automatic 40× dilution handling plus aliquot volume reporting.
-- Experiment naming flows that feed into clipboard exports and generate dated CSV/XLSX filenames alongside formatted 8×12 tables and consolidated workbooks covering plate layouts, dilution planning, and pHrodo results.
+- 96-well plate map generation with technical duplicates, controls, and per cell line/timepoint combinations.
+- Concentration calculator to compute source and PBS volumes for desired assay concentrations.
+- Reagent B mastermix calculator with 10% overage and 40× dilution handling.
+- CSV export or clipboard copy of plate layouts.
 
 All data is handled in memory—no database required.

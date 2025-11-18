@@ -23,35 +23,18 @@
           </div>
           <button id="generatePlateMap" class="btn btn-primary">Generate Plate Map</button>
         </div>
-        <div class="grid grid-plate">
-          <label>
-            <span>Experiment Name</span>
-            <input id="experimentName" type="text" placeholder="HER2-screen" />
-          </label>
-          <label>
-            <span>Replicates per Condition</span>
-            <input id="replicates" type="number" min="1" value="2" />
-          </label>
+        <div class="grid">
           <label>
             <span>Test Articles</span>
             <textarea id="testArticles" rows="4" placeholder="HA-00059, HA-00061, HA-00390"></textarea>
           </label>
           <label>
             <span>Cell Lines</span>
-            <textarea id="cellLines" rows="4">KPL4
-NCIN87</textarea>
+            <textarea id="cellLines" rows="4" placeholder="KPL4, NCIN87"></textarea>
           </label>
           <label>
             <span>Timepoints (hours)</span>
-            <textarea id="timepoints" rows="4">0
-4</textarea>
-          </label>
-          <label>
-            <span>Fill Orientation</span>
-            <select id="orientation">
-              <option value="horizontal">Horizontal</option>
-              <option value="vertical">Vertical</option>
-            </select>
+            <textarea id="timepoints" rows="4" placeholder="0, 4, 24"></textarea>
           </label>
           <div class="checkbox-group">
             <label class="checkbox-label">
@@ -80,8 +63,6 @@ NCIN87</textarea>
           <div class="button-row">
             <button id="exportCsv" class="btn">Export CSV</button>
             <button id="copyCsv" class="btn">Copy CSV</button>
-            <button id="copyPlateTables" class="btn">Copy 8×12 Table</button>
-            <button id="exportXlsx" class="btn">Export XLSX</button>
           </div>
         </div>
         <div id="plateContainer" class="plate-container"></div>
@@ -93,12 +74,7 @@ NCIN87</textarea>
             <h2>Concentration Calculator</h2>
             <p>Compute source and PBS volumes for assay dilutions.</p>
           </div>
-          <div class="button-row">
-            <button id="loadArticlesFromPlate" class="btn">Use Plate Articles</button>
-            <button id="copyDilutionResults" class="btn">Copy Results</button>
-            <button id="resetDilutionTable" class="btn">Reset Table</button>
-            <button id="calculateDilutions" class="btn btn-primary">Calculate Dilutions</button>
-          </div>
+          <button id="calculateDilutions" class="btn btn-primary">Calculate Dilutions</button>
         </div>
         <div class="table-wrapper">
           <table>
@@ -116,11 +92,11 @@ NCIN87</textarea>
         <div class="grid">
           <label>
             <span>Desired Final Concentration (µM)</span>
-            <input id="finalConcentration" type="number" min="0" value="1.5" step="0.1" />
+            <input id="finalConcentration" type="number" min="0" />
           </label>
           <label>
             <span>Total Assay Volume (µL)</span>
-            <input id="totalVolume" type="number" min="0" value="100" />
+            <input id="totalVolume" type="number" min="0" />
           </label>
         </div>
         <p id="dilutionError" class="error"></p>
@@ -142,13 +118,10 @@ NCIN87</textarea>
       <section class="card">
         <div class="section-header">
           <div>
-            <h2>pHrodo Calculator</h2>
-            <p>Estimate pHrodo and PBS volumes with configurable overage.</p>
+            <h2>Mastermix Reagent B Calculator</h2>
+            <p>Estimate reagent B and PBS volumes with 10% overage.</p>
           </div>
-          <div class="button-row">
-            <button id="loadPhrodoFromPlate" class="btn">Use Plate Setup</button>
-            <button id="calculatePhrodo" class="btn btn-primary">Calculate</button>
-          </div>
+          <button id="calculateReagentB" class="btn btn-primary">Calculate</button>
         </div>
         <div class="grid">
           <label>
@@ -165,15 +138,11 @@ NCIN87</textarea>
           </label>
           <label>
             <span>Replicates per Condition</span>
-            <input id="reagentReplicates" type="number" min="1" value="2" />
+            <input id="reagentReplicates" type="number" min="1" />
           </label>
           <label>
             <span>Volume per Replicate (µL)</span>
             <input id="reagentVolume" type="number" min="0" step="0.01" />
-          </label>
-          <label>
-            <span>Overage (%)</span>
-            <input id="reagentOverage" type="number" min="0" step="0.1" value="10" />
           </label>
         </div>
         <p id="reagentError" class="error"></p>
@@ -184,16 +153,12 @@ NCIN87</textarea>
             <p id="totalVolumeResult" class="value"></p>
           </div>
           <div>
-            <p class="label">pHrodo Volume</p>
-            <p id="phrodoResult" class="value"></p>
+            <p class="label">Reagent B</p>
+            <p id="reagentBResult" class="value"></p>
           </div>
           <div>
             <p class="label">PBS Volume</p>
-            <p id="pbsResult" class="value"></p>
-          </div>
-          <div>
-            <p class="label">Aliquot Volume</p>
-            <p id="aliquotResult" class="value"></p>
+            <p id="reagentPBSResult" class="value"></p>
           </div>
         </div>
       </section>

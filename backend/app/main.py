@@ -12,7 +12,6 @@ from urllib.parse import urlparse
 import mimetypes
 
 FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
-MAX_PLATE_COLUMNS = 12
 
 
 def _load_static_file(request_path: str) -> Tuple[bytes, str]:
@@ -31,7 +30,7 @@ def _load_static_file(request_path: str) -> Tuple[bytes, str]:
 try:  # pragma: no cover - import shim for direct execution
     from .services import (
         calculate_concentrations,
-        calculate_phrodo_requirements,
+        calculate_reagent_b_requirements,
         generate_plate_maps,
     )
 except ImportError:  # pragma: no cover - fallback when run as a script
@@ -44,7 +43,7 @@ except ImportError:  # pragma: no cover - fallback when run as a script
 
     from services import (  # type: ignore
         calculate_concentrations,
-        calculate_phrodo_requirements,
+        calculate_reagent_b_requirements,
         generate_plate_maps,
     )
 
@@ -176,7 +175,7 @@ def _parse_dilution_payload(payload: Dict[str, Any]) -> Tuple[List[Dict[str, Any
     return items, final_conc, total_volume
 
 
-def _parse_phrodo_payload(payload: Dict[str, Any]) -> Tuple[int, int, int, int, float, float]:
+def _parse_reagent_b_payload(payload: Dict[str, Any]) -> Tuple[int, int, int, int, float]:
     required_int_keys = (
         "number_of_timepoints",
         "number_of_test_articles",
@@ -188,22 +187,11 @@ def _parse_phrodo_payload(payload: Dict[str, Any]) -> Tuple[int, int, int, int, 
         value = payload.get(key)
         if not isinstance(value, (int, float)):
             raise ValueError(f"'{key}' must be a positive number")
-        converted = int(value)
-        if converted <= 0:
-            raise ValueError(f"'{key}' must be greater than zero")
-        values[key] = converted
+        values[key] = int(value)
 
     volume = payload.get("volume_per_replicate_uL")
     if not isinstance(volume, (int, float)):
         raise ValueError("'volume_per_replicate_uL' must be a positive number")
-    if volume <= 0:
-        raise ValueError("'volume_per_replicate_uL' must be greater than zero")
-
-    overage = payload.get("overage_percent", 10)
-    if not isinstance(overage, (int, float)):
-        raise ValueError("'overage_percent' must be a number")
-    if float(overage) < 0:
-        raise ValueError("'overage_percent' cannot be negative")
 
     return (
         values["number_of_timepoints"],
@@ -211,7 +199,6 @@ def _parse_phrodo_payload(payload: Dict[str, Any]) -> Tuple[int, int, int, int, 
         values["number_of_cell_lines"],
         values["replicates_per_condition"],
         float(volume),
-        float(overage),
     )
 
 
@@ -268,8 +255,8 @@ class AssayRequestHandler(BaseHTTPRequestHandler):
                 self._handle_plate_map(payload)
             elif self.path == "/dilutions":
                 self._handle_dilutions(payload)
-            elif self.path in {"/reagent-b", "/phrodo"}:
-                self._handle_phrodo(payload)
+            elif self.path == "/reagent-b":
+                self._handle_reagent_b(payload)
             else:
                 _json_error(self, HTTPStatus.NOT_FOUND, "Endpoint not found")
         except ValueError as exc:
@@ -303,22 +290,20 @@ class AssayRequestHandler(BaseHTTPRequestHandler):
         results = calculate_concentrations(items, final_conc, total_volume)
         _json_response(self, HTTPStatus.OK, results)
 
-    def _handle_phrodo(self, payload: Dict[str, Any]) -> None:
+    def _handle_reagent_b(self, payload: Dict[str, Any]) -> None:
         (
             number_of_timepoints,
             number_of_test_articles,
             number_of_cell_lines,
             replicates_per_condition,
             volume_per_replicate_uL,
-            overage_percent,
-        ) = _parse_phrodo_payload(payload)
-        result = calculate_phrodo_requirements(
+        ) = _parse_reagent_b_payload(payload)
+        result = calculate_reagent_b_requirements(
             number_of_timepoints,
             number_of_test_articles,
             number_of_cell_lines,
             replicates_per_condition,
             volume_per_replicate_uL,
-            overage_percent,
         )
         _json_response(self, HTTPStatus.OK, result)
 

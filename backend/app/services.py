@@ -1,18 +1,16 @@
 from __future__ import annotations
 
-from typing import Dict, List, Sequence, Tuple
+from typing import Dict, Iterable, List, Tuple
 
 ROW_LABELS = ["A", "B", "C", "D", "E", "F", "G", "H"]
 COLUMN_RANGE = list(range(1, 13))
-
-Coordinate = Tuple[str, int]
 NEGATIVE_CONTROL = "HB-44976-b1"
 LIVE_DEAD_CONTROL = "live:dead"
 UNSTAINED_CONTROL = "unstained"
 
 
-def _horizontal_groups(replicates: int) -> List[Sequence[Coordinate]]:
-    groups: List[Sequence[Coordinate]] = []
+def _well_positions() -> List[Tuple[str, int]]:
+    positions: List[Tuple[str, int]] = []
     for row in ROW_LABELS:
         start_column = replicates + 1 if row == "A" else 1
         for column in range(start_column, COLUMN_RANGE[-1] + 1, replicates):
@@ -49,10 +47,8 @@ def _assignment_groups(orientation: str, replicates: int) -> List[Sequence[Coord
         else _horizontal_groups(replicates)
     )
 
-    if len(groups) < 2:
-        raise ValueError("Unable to resolve plate layout for the requested orientation.")
 
-    return groups
+ALL_POSITIONS = _well_positions()
 
 
 def _format_well_id(row: str, column: int) -> str:
@@ -68,12 +64,6 @@ def _assign_well(row: str, column: int, label: str, cell_line: str, timepoint: f
         "cell_line": cell_line,
         "timepoint": timepoint,
     }
-def _validate_replicates(replicates: int) -> int:
-    if replicates <= 0:
-        raise ValueError("Replicates must be greater than zero.")
-    if replicates > COLUMN_RANGE[-1]:
-        raise ValueError("Replicates cannot exceed the number of columns in the plate.")
-    return replicates
 
 
 def _validate_capacity(
@@ -293,34 +283,23 @@ def calculate_concentrations(
     return results
 
 
-def calculate_phrodo_requirements(
+def calculate_reagent_b_requirements(
     number_of_timepoints: int,
     number_of_test_articles: int,
     number_of_cell_lines: int,
     replicates_per_condition: int,
     volume_per_replicate_uL: float,
-    overage_percent: float,
 ) -> Dict[str, float]:
     total_conditions = (
         number_of_timepoints * number_of_test_articles * number_of_cell_lines * replicates_per_condition
     )
 
-    if total_conditions <= 0 or volume_per_replicate_uL <= 0:
-        raise ValueError("Input values must be greater than zero.")
-
-    if overage_percent < 0:
-        raise ValueError("Overage percent cannot be negative.")
-
-    overage_multiplier = 1 + (overage_percent / 100)
-
-    total_volume = total_conditions * volume_per_replicate_uL * overage_multiplier
-    phrodo_volume = total_volume / 40
-    diluent_volume = total_volume - phrodo_volume
-    aliquot_volume = total_volume / 8
+    total_volume = total_conditions * volume_per_replicate_uL * 1.1
+    reagent_b_volume = total_volume / 40
+    diluent_volume = total_volume - reagent_b_volume
 
     return {
         "total_volume_uL": round(total_volume, 2),
-        "phrodo_volume_uL": round(phrodo_volume, 2),
+        "reagent_b_volume_uL": round(reagent_b_volume, 2),
         "diluent_volume_uL": round(diluent_volume, 2),
-        "aliquot_volume_uL": round(aliquot_volume, 2),
     }

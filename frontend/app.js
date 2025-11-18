@@ -39,8 +39,6 @@ const API_BASE = inferApiBase();
 const ROW_LABELS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
 const COLUMN_LABELS = Array.from({ length: 12 }, (_, index) => index + 1);
 
-const experimentNameInput = document.querySelector('#experimentName');
-const replicatesInput = document.querySelector('#replicates');
 const testArticlesInput = document.querySelector('#testArticles');
 const cellLinesInput = document.querySelector('#cellLines');
 const timepointsInput = document.querySelector('#timepoints');
@@ -54,8 +52,6 @@ const plateSummary = document.querySelector('#plateSummary');
 const plateContainer = document.querySelector('#plateContainer');
 const exportCsvButton = document.querySelector('#exportCsv');
 const copyCsvButton = document.querySelector('#copyCsv');
-const copyPlateTablesButton = document.querySelector('#copyPlateTables');
-const exportXlsxButton = document.querySelector('#exportXlsx');
 
 const dilutionTableBody = document.querySelector('#dilutionTableBody');
 const finalConcentrationInput = document.querySelector('#finalConcentration');
@@ -63,35 +59,20 @@ const totalVolumeInput = document.querySelector('#totalVolume');
 const dilutionError = document.querySelector('#dilutionError');
 const dilutionResultsSection = document.querySelector('#dilutionResults');
 const dilutionResultsBody = document.querySelector('#dilutionResultsBody');
-const loadArticlesButton = document.querySelector('#loadArticlesFromPlate');
-const copyDilutionResultsButton = document.querySelector('#copyDilutionResults');
-const resetDilutionTableButton = document.querySelector('#resetDilutionTable');
 
 const reagentTimepointsInput = document.querySelector('#reagentTimepoints');
 const reagentArticlesInput = document.querySelector('#reagentArticles');
 const reagentCellLinesInput = document.querySelector('#reagentCellLines');
 const reagentReplicatesInput = document.querySelector('#reagentReplicates');
 const reagentVolumeInput = document.querySelector('#reagentVolume');
-const reagentOverageInput = document.querySelector('#reagentOverage');
 const reagentError = document.querySelector('#reagentError');
 const reagentResults = document.querySelector('#reagentResults');
 const totalVolumeResult = document.querySelector('#totalVolumeResult');
-const phrodoResult = document.querySelector('#phrodoResult');
-const pbsResult = document.querySelector('#pbsResult');
-const aliquotResult = document.querySelector('#aliquotResult');
-const loadPhrodoButton = document.querySelector('#loadPhrodoFromPlate');
+const reagentBResult = document.querySelector('#reagentBResult');
+const reagentPBSResult = document.querySelector('#reagentPBSResult');
 
 let plateMaps = [];
 let dilutionRows = [];
-let latestPlateInputs = {
-  testArticles: [],
-  cellLines: [],
-  timepoints: [],
-  replicates: 2,
-  experimentName: '',
-};
-let latestDilutionResults = [];
-let latestPhrodoResult = null;
 
 const parseListInput = (value) =>
   value
@@ -103,37 +84,6 @@ const parseNumericList = (value) =>
   parseListInput(value)
     .map((entry) => Number(entry))
     .filter((entry) => !Number.isNaN(entry));
-
-function sanitizeFilenameSegment(value) {
-  return value
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^A-Za-z0-9-_]+/g, '-')
-    .replace(/-{2,}/g, '-')
-    .replace(/^-|-$/g, '');
-}
-
-function getExportBaseName() {
-  const experimentRaw = experimentNameInput?.value?.trim() || '';
-  const sanitizedExperiment = sanitizeFilenameSegment(experimentRaw) || 'assay';
-  const now = new Date();
-  const isoDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
-    now.getDate(),
-  ).padStart(2, '0')}`;
-  return `${sanitizedExperiment}_${isoDate}-assay-setup`;
-}
-
-function getLatestReplicates() {
-  const stored = Number(latestPlateInputs.replicates);
-  if (!Number.isNaN(stored) && stored > 0) {
-    return stored;
-  }
-  const fromInput = Number(replicatesInput?.value);
-  if (!Number.isNaN(fromInput) && fromInput > 0) {
-    return Math.floor(fromInput);
-  }
-  return null;
-}
 
 function renderDilutionRows() {
   dilutionTableBody.innerHTML = '';
@@ -152,18 +102,8 @@ function renderDilutionRows() {
     articleInput.addEventListener('input', (event) => {
       dilutionRows[index].testArticle = event.target.value;
     });
-    articleInput.addEventListener('paste', (event) => {
-      if (handleDilutionPaste(event, index, 'article')) {
-        renderDilutionRows();
-      }
-    });
     stockInput.addEventListener('input', (event) => {
       dilutionRows[index].stockConcentration = event.target.value;
-    });
-    stockInput.addEventListener('paste', (event) => {
-      if (handleDilutionPaste(event, index, 'stock')) {
-        renderDilutionRows();
-      }
     });
     dilutionTableBody.appendChild(tr);
   });
@@ -182,23 +122,6 @@ async function generatePlateMap() {
   const testArticles = parseListInput(testArticlesInput.value);
   const cellLines = parseListInput(cellLinesInput.value);
   const timepoints = parseNumericList(timepointsInput.value);
-  const orientation = orientationSelect.value || 'horizontal';
-  const replicatesValue = Number(replicatesInput.value);
-
-  if (!Number.isFinite(replicatesValue) || replicatesValue <= 0) {
-    plateError.textContent = 'Replicates must be a positive number.';
-    return;
-  }
-
-  const replicates = Math.floor(replicatesValue);
-  if (replicates !== replicatesValue) {
-    replicatesInput.value = String(replicates);
-  }
-
-  if (replicates > 12) {
-    plateError.textContent = 'Replicates cannot exceed the number of plate columns (12).';
-    return;
-  }
 
   if (!testArticles.length || !cellLines.length || !timepoints.length) {
     plateError.textContent = 'Please provide test articles, cell lines, and numeric timepoints.';
@@ -232,46 +155,18 @@ async function generatePlateMap() {
 
     const data = await response.json();
     plateMaps = Array.isArray(data.plates) ? data.plates : [];
-    latestPlateInputs = {
-      testArticles,
-      cellLines,
-      timepoints,
-      replicates,
-      experimentName: experimentNameInput?.value?.trim() || '',
-    };
 
     if (plateMaps.length === 0) {
       plateResultsSection.classList.add('hidden');
       return;
     }
 
-    const summaryParts = [];
-    if (latestPlateInputs.experimentName) {
-      summaryParts.push(latestPlateInputs.experimentName);
-    }
-    summaryParts.push(
-      `${plateMaps.length} plate${plateMaps.length > 1 ? 's' : ''} generated`,
-    );
-    if (plateMaps.length > 1) {
-      summaryParts.push('Displaying first plate example');
-    }
-    summaryParts.push(
-      `${replicates} replicate${replicates === 1 ? '' : 's'} per condition`,
-    );
-    plateSummary.textContent = summaryParts.join(' • ');
+    plateSummary.textContent = `${plateMaps.length} plate${plateMaps.length > 1 ? 's' : ''} generated.`;
     plateResultsSection.classList.remove('hidden');
     renderPlateMaps();
   } catch (error) {
     plateError.textContent = error.message;
     plateResultsSection.classList.add('hidden');
-    plateMaps = [];
-    latestPlateInputs = {
-      testArticles: [],
-      cellLines: [],
-      timepoints: [],
-      replicates,
-      experimentName: experimentNameInput?.value?.trim() || '',
-    };
   }
 }
 
@@ -327,59 +222,41 @@ function renderPlateMaps() {
   gridWrapper.className = 'plate-grid';
   const table = document.createElement('table');
 
-  const thead = document.createElement('thead');
-  const headerRow = document.createElement('tr');
-  const corner = document.createElement('th');
-  corner.textContent = 'Row';
-  headerRow.appendChild(corner);
-  COLUMN_LABELS.forEach((column) => {
-    const th = document.createElement('th');
-    th.textContent = column;
-    headerRow.appendChild(th);
-  });
-  thead.appendChild(headerRow);
+    const tbody = document.createElement('tbody');
+    const lookup = buildWellLookup(plate.wells);
 
-  const tbody = document.createElement('tbody');
-  const lookup = buildWellLookup(plate.wells);
+    ROW_LABELS.forEach((row) => {
+      const tr = document.createElement('tr');
+      const rowHeader = document.createElement('td');
+      rowHeader.textContent = row;
+      tr.appendChild(rowHeader);
 
-  ROW_LABELS.forEach((row) => {
-    const tr = document.createElement('tr');
-    const rowHeader = document.createElement('td');
-    rowHeader.textContent = row;
-    tr.appendChild(rowHeader);
+      COLUMN_LABELS.forEach((column) => {
+        const td = document.createElement('td');
+        const well = lookup.get(`${row}${column}`);
+        if (well) {
+          td.innerHTML = `
+            <div class="well">
+              <span>${well.test_article}</span>
+              <span class="id">${well.well_id}</span>
+            </div>
+          `;
+        } else {
+          td.innerHTML = '<span class="placeholder">—</span>';
+        }
+        tr.appendChild(td);
+      });
 
-    COLUMN_LABELS.forEach((column) => {
-      const td = document.createElement('td');
-      const well = lookup.get(`${row}${column}`);
-      if (well) {
-        td.innerHTML = `
-          <div class="well">
-            <span>${well.test_article}</span>
-            <span class="id">${well.well_id}</span>
-          </div>
-        `;
-      } else {
-        td.innerHTML = '<span class="placeholder">—</span>';
-      }
-      tr.appendChild(td);
+      tbody.appendChild(tr);
     });
 
-    tbody.appendChild(tr);
+    table.appendChild(thead);
+    table.appendChild(tbody);
+    gridWrapper.appendChild(table);
+    plateElement.appendChild(header);
+    plateElement.appendChild(gridWrapper);
+    plateContainer.appendChild(plateElement);
   });
-
-  table.appendChild(thead);
-  table.appendChild(tbody);
-  gridWrapper.appendChild(table);
-  plateElement.appendChild(header);
-  plateElement.appendChild(gridWrapper);
-  plateContainer.appendChild(plateElement);
-
-  if (plateMaps.length > 1) {
-    const note = document.createElement('p');
-    note.className = 'subtle plate-note';
-    note.textContent = `Showing 1 of ${plateMaps.length} plates. Use exports for full layouts.`;
-    plateContainer.appendChild(note);
-  }
 }
 
 function buildCsvRows() {
@@ -432,35 +309,15 @@ function buildCsvRows() {
   return rows;
 }
 
-function buildPlateRowsWithMetadata() {
-  const rows = buildCsvRows();
-  const metadata = [];
-  const experimentName = experimentNameInput?.value?.trim();
-  if (experimentName) {
-    metadata.push(['Experiment', experimentName]);
-  }
-  const replicates = getLatestReplicates();
-  if (replicates) {
-    metadata.push(['Replicates per Condition', String(replicates)]);
-  }
-  if (metadata.length) {
-    rows.unshift([]);
-    for (let index = metadata.length - 1; index >= 0; index -= 1) {
-      rows.unshift(metadata[index]);
-    }
-  }
-  return rows;
-}
-
 function exportCsv() {
   if (!plateMaps.length) return;
-  const rows = buildPlateRowsWithMetadata();
+  const rows = buildCsvRows();
   const csv = rows.map((line) => line.join(',')).join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `${getExportBaseName()}-plate-maps.csv`;
+  link.download = 'plate-maps.csv';
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
@@ -976,19 +833,16 @@ async function calculateDilutions() {
     }
 
     const results = await response.json();
-    latestDilutionResults = Array.isArray(results) ? results : [];
-    renderDilutionResults(latestDilutionResults);
+    renderDilutionResults(results);
   } catch (error) {
     dilutionError.textContent = error.message;
     dilutionResultsSection.classList.add('hidden');
-    latestDilutionResults = [];
   }
 }
 
 function renderDilutionResults(results) {
   if (!Array.isArray(results) || results.length === 0) {
     dilutionResultsSection.classList.add('hidden');
-    latestDilutionResults = [];
     return;
   }
 
@@ -1005,41 +859,24 @@ function renderDilutionResults(results) {
   dilutionResultsSection.classList.remove('hidden');
 }
 
-async function calculatePhrodo() {
+async function calculateReagentB() {
   const payload = {
     number_of_timepoints: Number(reagentTimepointsInput.value),
     number_of_test_articles: Number(reagentArticlesInput.value),
     number_of_cell_lines: Number(reagentCellLinesInput.value),
     replicates_per_condition: Number(reagentReplicatesInput.value),
     volume_per_replicate_uL: Number(reagentVolumeInput.value),
-    overage_percent: Number(reagentOverageInput.value),
   };
 
-  const requiredPositiveKeys = [
-    'number_of_timepoints',
-    'number_of_test_articles',
-    'number_of_cell_lines',
-    'replicates_per_condition',
-  ];
-
-  const hasInvalidCoreValue = requiredPositiveKeys.some(
-    (key) => Number.isNaN(payload[key]) || payload[key] <= 0,
-  );
-
-  if (hasInvalidCoreValue || Number.isNaN(payload.volume_per_replicate_uL) || payload.volume_per_replicate_uL <= 0) {
-    reagentError.textContent = 'All counts must be positive and volume per replicate must be greater than zero.';
-    return;
-  }
-
-  if (Number.isNaN(payload.overage_percent) || payload.overage_percent < 0) {
-    reagentError.textContent = 'Overage must be zero or a positive number.';
+  if (Object.values(payload).some((value) => Number.isNaN(value) || value <= 0)) {
+    reagentError.textContent = 'All inputs must be positive numbers.';
     return;
   }
 
   reagentError.textContent = '';
 
   try {
-    const response = await fetch(`${API_BASE}/phrodo`, {
+    const response = await fetch(`${API_BASE}/reagent-b`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1053,20 +890,13 @@ async function calculatePhrodo() {
     }
 
     const data = await response.json();
-    latestPhrodoResult = data;
     totalVolumeResult.textContent = `${data.total_volume_uL} µL`;
-    phrodoResult.textContent = `${data.phrodo_volume_uL} µL`;
-    pbsResult.textContent = `${data.diluent_volume_uL} µL`;
-    aliquotResult.textContent = `${data.aliquot_volume_uL} µL`;
+    reagentBResult.textContent = `${data.reagent_b_volume_uL} µL`;
+    reagentPBSResult.textContent = `${data.diluent_volume_uL} µL`;
     reagentResults.classList.remove('hidden');
   } catch (error) {
     reagentError.textContent = error.message;
     reagentResults.classList.add('hidden');
-    latestPhrodoResult = null;
-    totalVolumeResult.textContent = '';
-    phrodoResult.textContent = '';
-    pbsResult.textContent = '';
-    aliquotResult.textContent = '';
   }
 }
 
@@ -1076,82 +906,6 @@ document.querySelector('#addDilutionRow').addEventListener('click', () => {
   renderDilutionRows();
 });
 document.querySelector('#calculateDilutions').addEventListener('click', calculateDilutions);
-document.querySelector('#calculatePhrodo').addEventListener('click', calculatePhrodo);
+document.querySelector('#calculateReagentB').addEventListener('click', calculateReagentB);
 exportCsvButton.addEventListener('click', exportCsv);
 copyCsvButton.addEventListener('click', copyCsv);
-copyPlateTablesButton.addEventListener('click', copyPlateTables);
-exportXlsxButton.addEventListener('click', exportXlsx);
-copyDilutionResultsButton.addEventListener('click', copyDilutionResults);
-resetDilutionTableButton.addEventListener('click', resetDilutionTable);
-loadArticlesButton.addEventListener('click', () => {
-  if (!latestPlateInputs.testArticles.length) {
-    dilutionError.textContent = 'Generate a plate map to load test articles.';
-    return;
-  }
-  dilutionError.textContent = '';
-  dilutionRows = latestPlateInputs.testArticles.map((article) => ({
-    testArticle: article,
-    stockConcentration: '',
-  }));
-  if (dilutionRows.length === 0) {
-    dilutionRows.push({ testArticle: '', stockConcentration: '' });
-  }
-  renderDilutionRows();
-});
-loadPhrodoButton.addEventListener('click', () => {
-  if (!latestPlateInputs.testArticles.length) {
-    reagentError.textContent = 'Generate a plate map to load counts.';
-    return;
-  }
-  reagentError.textContent = '';
-  reagentTimepointsInput.value = latestPlateInputs.timepoints.length || '';
-  reagentArticlesInput.value = latestPlateInputs.testArticles.length || '';
-  reagentCellLinesInput.value = latestPlateInputs.cellLines.length || '';
-  reagentReplicatesInput.value = latestPlateInputs.replicates || '';
-});
-
-function handleDilutionPaste(event, startIndex, sourceField) {
-  const text = event.clipboardData?.getData('text');
-  if (!text) {
-    return false;
-  }
-
-  const lines = text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  const isStructured = lines.length > 1 || /[\t,]/.test(text);
-  if (!isStructured) {
-    return false;
-  }
-
-  event.preventDefault();
-
-  lines.forEach((line, offset) => {
-    if (!line) return;
-    const parts = line.split(/[\t,]/).map((part) => part.trim());
-    const targetIndex = startIndex + offset;
-    if (!dilutionRows[targetIndex]) {
-      dilutionRows.push({ testArticle: '', stockConcentration: '' });
-    }
-
-    if (parts.length === 1) {
-      if (sourceField === 'stock') {
-        dilutionRows[targetIndex].stockConcentration = parts[0];
-      } else {
-        dilutionRows[targetIndex].testArticle = parts[0];
-      }
-    } else {
-      const [article, stock] = parts;
-      if (article) {
-        dilutionRows[targetIndex].testArticle = article;
-      }
-      if (typeof stock !== 'undefined') {
-        dilutionRows[targetIndex].stockConcentration = stock;
-      }
-    }
-  });
-
-  return true;
-}
